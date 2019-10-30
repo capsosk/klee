@@ -263,12 +263,12 @@ SpecialFunctionHandler::readStringAtAddress(ExecutionState &state,
   }
 
   bool res __attribute__ ((unused));
-  assert(executor.solver->mustBeTrue(state, 
+  /*assert(executor.solver->mustBeTrue(state,
                                      EqExpr::create(address.getOffset(),
                                                     op.first->getBaseExpr()),
                                      res) &&
          res &&
-         "XXX interior pointer unhandled");
+         "XXX interior pointer unhandled");*/
   const MemoryObject *mo = op.first;
   const ObjectState *os = op.second;
 
@@ -862,7 +862,7 @@ void SpecialFunctionHandler::handleMakeSymbolic(ExecutionState &state,
     return;
   }
 
-  name = arguments[2].value->isZero() ? "" : readStringAtAddress(state, arguments[2]);
+  name = arguments[2].pointerSegment->isZero() ? "" : readStringAtAddress(state, arguments[2]);
   if (name.length() == 0) {
     name = "unnamed";
     klee_warning("klee_make_symbolic: renamed empty name to \"unnamed\"");

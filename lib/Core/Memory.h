@@ -142,6 +142,9 @@ public:
   uint64_t getSegment() const {
     return segment;
   }
+  ref<ConstantExpr> getZeroExpr() const {
+    return ConstantExpr::create(0, Context::get().getPointerWidth());
+  }
   ref<ConstantExpr> getSegmentExpr() const {
     return ConstantExpr::create(segment, Context::get().getPointerWidth());
   }
@@ -149,7 +152,7 @@ public:
     return ConstantExpr::create(address, Context::get().getPointerWidth());
   }
   KValue getPointer() const {
-    return KValue(getSegmentExpr(), getBaseExpr());
+    return KValue(getSegmentExpr(), getZeroExpr());
   }
   KValue getPointer(uint64_t offset) const {
     return KValue(getSegmentExpr(),

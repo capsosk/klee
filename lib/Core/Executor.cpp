@@ -3304,7 +3304,7 @@ void Executor::callExternalFunction(ExecutionState &state,
     if (ExternalCalls == ExternalCallPolicy::All) { // don't bother checking uniqueness
       auto value = optimizer.optimizeExpr(ai->getValue(), true);
       ref<ConstantExpr> ce;
-      // TODO segment
+      // TODO segment #warning
       bool success = solver->getValue(state, value, ce);
       assert(success && "FIXME: Unhandled solver failure");
       ce->toMemory(&args[wordIndex]);
@@ -3335,10 +3335,9 @@ void Executor::callExternalFunction(ExecutionState &state,
                                   function->getName());
         return;
       }
-
+      ObjectPair op;
       if (!segmentExpr->isZero() ||
           ai->getOffset()->getWidth() == Context::get().getPointerWidth()) {
-        ObjectPair op;
         bool success;
         state.addressSpace.resolveOne(state, solver, *ai, op, success);
         if (success) {
@@ -3354,8 +3353,15 @@ void Executor::callExternalFunction(ExecutionState &state,
           klee_warning("passing pointer to external call, may not work properly");
         }
       }
+      //TODO segment!
+      ref<Expr> arg;
+      
+      if (op.first) {
+        arg = toUnique(state, op.first->getBaseExpr());
+      } else {
+        arg = toUnique(state, ai->getValue());
+      }
 
-      ref<Expr> arg = toUnique(state, ai->getValue());
       if (ConstantExpr *ce = dyn_cast<ConstantExpr>(arg)) {
         // XXX kick toMemory functions from here
         ce->toMemory(&args[wordIndex]);
@@ -3403,8 +3409,12 @@ void Executor::callExternalFunction(ExecutionState &state,
     llvm::raw_string_ostream os(TmpStr);
     os << "calling external: " << function->getName().str() << "(";
     for (unsigned i=0; i<arguments.size(); i++) {
-      // TODO segment
-      os << arguments[i].value;
+      // TODO segment #warning
+      if (arguments[i].value->isZero()) {
+        os << "segment: " << arguments[i].pointerSegment;
+      } else {
+        os << "address: " << arguments[i].value;
+      }
       if (i != arguments.size()-1)
         os << ", ";
     }
@@ -3623,6 +3633,9 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   address = KValue(address.getSegment(),
                    optimizer.optimizeExpr(address.getOffset(), true));
 
+  auto seg = address.getSegment();
+  auto offset_new = optimizer.optimizeExpr(address.getOffset(), true);
+
   // fast path: single in-bounds resolution
   ObjectPair op;
   bool success;
@@ -3644,7 +3657,8 @@ void Executor::executeMemoryOperation(ExecutionState &state,
                        toConstant(state, address.getOffset(), "max-sym-array-size"));
     }
 
-    ref<Expr> offset = mo->getOffsetExpr(address.getOffset());
+    //TODO:: this is the current problem - we need a way to calculate offset
+    ref<Expr> offset = address.getOffset();
     ref<Expr> check = mo->getBoundsCheckOffset(offset, bytes);
     check = optimizer.optimizeExpr(check, true);
 

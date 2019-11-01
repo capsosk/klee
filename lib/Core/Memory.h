@@ -173,6 +173,9 @@ public:
   ref<Expr> getSizeExpr() const {
     return size;
   }
+  ref<Expr> getNonconstOffsetExpr(ref<Expr> pointer) const {
+    return SubExpr::create(pointer, getBaseExpr());
+  }
   ref<Expr> getOffsetExpr(ref<Expr> pointer) const {
     return SubExpr::create(pointer, getZeroExpr());
   }

@@ -156,7 +156,7 @@ public:
   }
   KValue getPointer(uint64_t offset) const {
     return KValue(getSegmentExpr(),
-                  AddExpr::create(getBaseExpr(),
+                  AddExpr::create(getZeroExpr(),
                                   ConstantExpr::create(offset,
                                                        Context::get().getPointerWidth())));
   }

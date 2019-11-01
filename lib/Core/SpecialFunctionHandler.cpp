@@ -263,12 +263,12 @@ SpecialFunctionHandler::readStringAtAddress(ExecutionState &state,
   }
 
   bool res __attribute__ ((unused));
-  /*assert(executor.solver->mustBeTrue(state,
+  assert(executor.solver->mustBeTrue(state,
                                      EqExpr::create(address.getOffset(),
-                                                    op.first->getBaseExpr()),
+                                                    op.first->getZeroExpr()),
                                      res) &&
          res &&
-         "XXX interior pointer unhandled");*/
+         "XXX interior pointer unhandled");
   const MemoryObject *mo = op.first;
   const ObjectState *os = op.second;
 

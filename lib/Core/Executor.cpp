@@ -3304,7 +3304,7 @@ void Executor::callExternalFunction(ExecutionState &state,
     if (ExternalCalls == ExternalCallPolicy::All) { // don't bother checking uniqueness
       auto value = optimizer.optimizeExpr(ai->getValue(), true);
       ref<ConstantExpr> ce;
-      // TODO segment #warning
+      // TODO segment
       bool success = solver->getValue(state, value, ce);
       assert(success && "FIXME: Unhandled solver failure");
       ce->toMemory(&args[wordIndex]);
@@ -3355,7 +3355,8 @@ void Executor::callExternalFunction(ExecutionState &state,
       }
       //TODO segment!
       ref<Expr> arg;
-      
+
+      //if no MO was found, use address
       if (op.first) {
         arg = toUnique(state, op.first->getBaseExpr());
       } else {
@@ -3409,7 +3410,7 @@ void Executor::callExternalFunction(ExecutionState &state,
     llvm::raw_string_ostream os(TmpStr);
     os << "calling external: " << function->getName().str() << "(";
     for (unsigned i=0; i<arguments.size(); i++) {
-      // TODO segment #warning
+      // TODO segment
       if (arguments[i].value->isZero()) {
         os << "segment: " << arguments[i].pointerSegment;
       } else {
@@ -3633,9 +3634,6 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   address = KValue(address.getSegment(),
                    optimizer.optimizeExpr(address.getOffset(), true));
 
-  auto seg = address.getSegment();
-  auto offset_new = optimizer.optimizeExpr(address.getOffset(), true);
-
   // fast path: single in-bounds resolution
   ObjectPair op;
   bool success;
@@ -3657,8 +3655,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
                        toConstant(state, address.getOffset(), "max-sym-array-size"));
     }
 
-    //TODO:: this is the current problem - we need a way to calculate offset
-    ref<Expr> offset = address.getOffset();
+    ref<Expr> offset = mo->getOffsetExpr(address.getOffset());
     ref<Expr> check = mo->getBoundsCheckOffset(offset, bytes);
     check = optimizer.optimizeExpr(check, true);
 

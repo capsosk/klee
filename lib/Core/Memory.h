@@ -174,7 +174,7 @@ public:
     return size;
   }
   ref<Expr> getOffsetExpr(ref<Expr> pointer) const {
-    return SubExpr::create(pointer, getBaseExpr());
+    return SubExpr::create(pointer, getZeroExpr());
   }
   ref<Expr> getBoundsCheckPointer(KValue pointer) const {
     return AndExpr::create(

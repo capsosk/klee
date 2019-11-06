@@ -1640,7 +1640,8 @@ void Executor::executeCall(ExecutionState &state,
               offset = llvm::RoundUpToAlignment(offset, 16);
 #endif
             }
-            os->write(offset, arguments[i].value);
+            KValue toWrite {arguments[i].getSegment(), arguments[i].getOffset()};
+            os->write(offset, toWrite);
 #if LLVM_VERSION_CODE >= LLVM_VERSION(3, 9)
             offset += llvm::alignTo(argWidth, WordSize) / 8;
 #else

@@ -3664,7 +3664,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
     //TODO : check if this is a valid fix for branching, revert to
     //ref<Expr> offset = mo->getOffsetExpr(address.getOffset());
 
-    if (isa<ConstantExpr>(address.getOffset()) && isa<ConstantExpr>(address.getSegment())) {
+    if (isa<ConstantExpr>(address.getOffset()) && !mo->isUserSpecified) {
        offset = mo->getOffsetExpr(address.getOffset());
     } else {
         offset = mo->getNonconstOffsetExpr(address.getOffset());

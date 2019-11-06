@@ -177,7 +177,7 @@ public:
     return SubExpr::create(pointer, getBaseExpr());
   }
   ref<Expr> getOffsetExpr(ref<Expr> pointer) const {
-    return SubExpr::create(pointer, getZeroExpr());
+    return pointer;
   }
   ref<Expr> getBoundsCheckPointer(KValue pointer) const {
     return AndExpr::create(

@@ -3660,16 +3660,9 @@ void Executor::executeMemoryOperation(ExecutionState &state,
                        toConstant(state, address.getOffset(), "max-sym-array-size"));
     }
 
-    ref<Expr> offset;
+    bool useAddress = address.getSegment()->isZero() || isa<ConcatExpr>(address.getOffset());
 
-    //TODO : check if this is a valid fix for branching, revert to
-    //ref<Expr> offset = mo->getOffsetExpr(address.getOffset());
-
-    if (isa<ConstantExpr>(address.getOffset()) && !mo->isUserSpecified) {
-       offset = mo->getOffsetExpr(address.getOffset());
-    } else {
-        offset = mo->getNonconstOffsetExpr(address.getOffset());
-    }
+    ref<Expr> offset = mo->getOffsetExpr(address.getOffset(), useAddress);
 
     ref<Expr> check = mo->getBoundsCheckOffset(offset, bytes);
     check = optimizer.optimizeExpr(check, true);

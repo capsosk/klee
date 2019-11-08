@@ -156,12 +156,11 @@ public:
   }
   KValue getPointer(uint64_t offset) const {
     return KValue(getSegmentExpr(),
-                  AddExpr::create(getZeroExpr(),
                                   ConstantExpr::create(offset,
-                                                       Context::get().getPointerWidth())));
+                                                       Context::get().getPointerWidth()));
   }
   std::string getAddressString() const {
-    return std::to_string(address);
+    return std::string(&"Segment: " [ segment ]);
   }
   std::string getSizeString() const {
     if (ConstantExpr *CE = dyn_cast<ConstantExpr>(size)) {
@@ -173,11 +172,11 @@ public:
   ref<Expr> getSizeExpr() const {
     return size;
   }
-  ref<Expr> getNonconstOffsetExpr(ref<Expr> pointer) const {
-    return SubExpr::create(pointer, getBaseExpr());
-  }
-  ref<Expr> getOffsetExpr(ref<Expr> pointer) const {
-    return pointer;
+  ref<Expr> getOffsetExpr(ref<Expr> pointer, bool useAddress = false) const {
+      if (useAddress)
+        return SubExpr::create(pointer, getBaseExpr());
+      else
+        return pointer;
   }
   ref<Expr> getBoundsCheckPointer(KValue pointer) const {
     return AndExpr::create(

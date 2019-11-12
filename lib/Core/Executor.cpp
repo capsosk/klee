@@ -1638,7 +1638,8 @@ void Executor::executeCall(ExecutionState &state,
               offset = llvm::RoundUpToAlignment(offset, 16);
 #endif
             }
-            os->write(offset, arguments[i].value);
+            KValue toWrite {arguments[i].getSegment(), arguments[i].getOffset()};
+            os->write(offset, toWrite);
 #if LLVM_VERSION_CODE >= LLVM_VERSION(3, 9)
             offset += llvm::alignTo(argWidth, WordSize) / 8;
 #else
@@ -2203,7 +2204,10 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
   case Instruction::And: {
     const Cell &left = eval(ki, 0, state);
     const Cell &right = eval(ki, 1, state);
-    bindLocal(ki, state, left.And(right));
+
+    auto newCell = left.And(right);
+    newCell.pointerSegment = left.getSegment();
+    bindLocal(ki, state, newCell);
     break;
   }
 
@@ -3330,10 +3334,10 @@ void Executor::callExternalFunction(ExecutionState &state,
                                   function->getName());
         return;
       }
-
+      ObjectPair op;
       if (!segmentExpr->isZero() ||
           ai->getOffset()->getWidth() == Context::get().getPointerWidth()) {
-        ObjectPair op;
+
         bool success;
         state.addressSpace.resolveOne(state, solver, *ai, op, success);
         if (success) {
@@ -3350,7 +3354,13 @@ void Executor::callExternalFunction(ExecutionState &state,
         }
       }
 
-      ref<Expr> arg = toUnique(state, ai->getValue());
+      ref<Expr> arg;
+      //if no MO was found, use address
+      if (op.first) {
+        arg = toUnique(state, op.first->getBaseExpr());
+      } else {
+        arg = toUnique(state, ai->getValue());
+      }
       if (ConstantExpr *ce = dyn_cast<ConstantExpr>(arg)) {
         // XXX kick toMemory functions from here
         ce->toMemory(&args[wordIndex]);
@@ -3399,7 +3409,11 @@ void Executor::callExternalFunction(ExecutionState &state,
     os << "calling external: " << function->getName().str() << "(";
     for (unsigned i=0; i<arguments.size(); i++) {
       // TODO segment
-      os << arguments[i].value;
+      if (arguments[i].value->isZero()) {
+        os << "segment: " << arguments[i].pointerSegment;
+      } else {
+        os << "address: " << arguments[i].value;
+      }
       if (i != arguments.size()-1)
         os << ", ";
     }
@@ -3639,7 +3653,9 @@ void Executor::executeMemoryOperation(ExecutionState &state,
                        toConstant(state, address.getOffset(), "max-sym-array-size"));
     }
 
-    ref<Expr> offset = mo->getOffsetExpr(address.getOffset());
+    bool useAddress = address.getSegment()->isZero() || isa<ConcatExpr>(address.getOffset());
+
+    ref<Expr> offset = mo->getOffsetExpr(address.getOffset(), useAddress);
     ref<Expr> check = mo->getBoundsCheckOffset(offset, bytes);
     check = optimizer.optimizeExpr(check, true);
 

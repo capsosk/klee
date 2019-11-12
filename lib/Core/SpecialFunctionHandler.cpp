@@ -287,7 +287,7 @@ SpecialFunctionHandler::readStringAtAddress(ExecutionState &state,
   bool res __attribute__ ((unused));
   assert(executor.solver->mustBeTrue(state, 
                                      EqExpr::create(address.getOffset(),
-                                                    op.first->getBaseExpr()),
+                                                    op.first->getZeroExpr()),
                                      res) &&
          res &&
          "XXX interior pointer unhandled");
@@ -738,7 +738,7 @@ void SpecialFunctionHandler::handleRealloc(ExecutionState &state,
   }
   if (zeroSize.second) { // size != 0
     Executor::StatePair zeroPointer = executor.fork(*zeroSize.second, 
-                                                    Expr::createIsZero(address.getOffset()),
+                                                    Expr::createIsZero(address.getSegment()),
                                                     true);
     
     if (zeroPointer.first) { // address == 0
@@ -884,7 +884,9 @@ void SpecialFunctionHandler::handleMakeSymbolic(ExecutionState &state,
     return;
   }
 
-  name = arguments[2].value->isZero() ? "" : readStringAtAddress(state, arguments[2]);
+  bool isZero = arguments[2].pointerSegment->isZero() && arguments[2].value->isZero();
+
+  name = isZero ? "" : readStringAtAddress(state, arguments[2]);
   if (name.length() == 0) {
     name = "unnamed";
     klee_warning("klee_make_symbolic: renamed empty name to \"unnamed\"");

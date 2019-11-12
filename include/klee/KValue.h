@@ -55,7 +55,11 @@ namespace klee {
     bool isConstant() const {
       return isa<ConstantExpr>(value) && isa<ConstantExpr>(pointerSegment);
     }
-
+    bool isZero() const {
+      ConstantExpr *segment = dyn_cast<ConstantExpr>(pointerSegment);
+      ConstantExpr *offset = dyn_cast<ConstantExpr>(value);
+      return (segment && offset && segment->isZero() && offset->isZero());
+    }
     Expr::Width getWidth() const {
       return getValue()->getWidth();
     }

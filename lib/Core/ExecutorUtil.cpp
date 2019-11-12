@@ -141,10 +141,9 @@ namespace klee {
     if (numOperands > 2)
       op3 = evalConstant(ce->getOperand(2), ki);
 
-#warning Constants evaluation, op2 contains the valut but op1 doesnt regression/2008-05-23-gep-with-global-const.c
-    /*if (!op1.getValue().isNull() && !op1.getSegment().isNull() && op1.isZero())
-        if (!op2.getSegment().isNull() && !op2.getValue().isNull())
-          op1 = op2;*/
+   if (numOperands == 2 && op1.isZero())
+     if (!op2.getSegment().isNull())
+       op1 = op2;
 
     /* Checking for possible errors during constant folding */
     switch (ce->getOpcode()) {

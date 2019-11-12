@@ -737,8 +737,8 @@ void SpecialFunctionHandler::handleRealloc(ExecutionState &state,
     executor.executeFree(*zeroSize.first, address, target);
   }
   if (zeroSize.second) { // size != 0
-    Executor::StatePair zeroPointer = executor.fork(*zeroSize.second, 
-                                                    Expr::createIsZero(address.getSegment()),
+    Executor::StatePair zeroPointer = executor.fork(*zeroSize.second,
+                                                     address.createIsZero(),
                                                     true);
     
     if (zeroPointer.first) { // address == 0

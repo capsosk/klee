@@ -238,7 +238,7 @@ MemoryObject *MemoryManager::allocate(uint64_t size, bool isLocal,
 MemoryObject *MemoryManager::allocate(ref<Expr> size, bool isLocal,
                                       bool isGlobal,
                                       const llvm::Value *allocSite,
-                                      size_t alignment) {
+                                      size_t alignment, bool allocate) {
   uint64_t concreteSize = 0;
   bool hasConcreteSize = false;
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(size)) {
@@ -250,7 +250,7 @@ MemoryObject *MemoryManager::allocate(ref<Expr> size, bool isLocal,
     klee_warning_once(0, "Large alloc: %" PRIu64 " bytes. "
                          "Not allocating this memory in real.",
                       concreteSize);
-      hasConcreteSize = false;
+    hasConcreteSize = false;
   }
 
   // Return NULL if size is zero, this is equal to error during allocation
@@ -270,13 +270,15 @@ MemoryObject *MemoryManager::allocate(ref<Expr> size, bool isLocal,
     // allocate 1 byte for symbolic-size allocation, just so we get an address
     concreteSize = hasConcreteSize ? concreteSize : 1;
   }
-
-  auto address = allocator.allocate(concreteSize, alignment);
-  if (!address)
-    return 0;
+  void *address = nullptr;
+  if(allocate) {
+    address = allocator.allocate(concreteSize, alignment);
+    if (!address)
+      return nullptr;
+  }
 
   ++stats::allocations;
-  MemoryObject *res = new MemoryObject(++lastSegment, (uint64_t)address,
+  MemoryObject *res = new MemoryObject(++lastSegment, reinterpret_cast<uint64_t>(address),
                                        size, concreteSize,
                                        isLocal, isGlobal, false, allocSite, this);
   objects.insert(res);

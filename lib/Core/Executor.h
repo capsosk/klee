@@ -300,8 +300,9 @@ private:
                     bool isLocal,
                     KInstruction *target,
                     bool zeroMemory=false,
-                    const ObjectState *reallocFrom=0,
-                    size_t allocationAlignment=0);
+                    const ObjectState *reallocFrom=nullptr,
+                    size_t allocationAlignment=0,
+                    bool allocate=true);
 
   ref<Expr> getSizeForAlloca(ExecutionState& state, KInstruction *ki) const;
 

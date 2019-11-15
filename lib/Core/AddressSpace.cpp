@@ -378,10 +378,12 @@ void AddressSpace::copyOutConcretes() {
         continue;
 
       if (!os->readOnly) {
-        auto &concreteStore = os->offsetPlane->concreteStore;
-        concreteStore.resize(os->offsetPlane->sizeBound,
-                             os->offsetPlane->initialValue);
-        memcpy(address, concreteStore.data(), concreteStore.size());
+        if (address) {
+          auto &concreteStore = os->offsetPlane->concreteStore;
+          concreteStore.resize(os->offsetPlane->sizeBound,
+                               os->offsetPlane->initialValue);
+          memcpy(address, concreteStore.data(), concreteStore.size());
+        }
       }
     }
   }
@@ -395,7 +397,7 @@ bool AddressSpace::copyInConcretes() {
     if (!mo->isUserSpecified) {
       const ObjectState *os = it->second;
 
-      if (!copyInConcrete(mo, os, mo->address))
+      if (mo->address && !copyInConcrete(mo, os, mo->address))
         return false;
     }
   }
@@ -423,6 +425,8 @@ bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
 /***/
 
 bool MemoryObjectLT::operator()(const MemoryObject *a, const MemoryObject *b) const {
-  return a->address < b->address;
+  if (a->address && b->address)
+    return a->address < b->address;
+  return a->segment < b->segment;
 }
 

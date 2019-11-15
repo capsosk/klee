@@ -138,7 +138,9 @@ public:
   void setName(std::string name) const {
     this->name = name;
   }
-
+  void setAddressForExternalCall(uint64_t newAddress) {
+    address = newAddress;
+  }
   uint64_t getSegment() const {
     return segment;
   }

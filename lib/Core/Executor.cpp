@@ -1392,7 +1392,7 @@ void Executor::executeLifetimeIntrinsic(ExecutionState &state,
     // XXX: we should distringuish between resolve error and dead object...
     if (!isEnd) {
       executeAlloc(state, getSizeForAlloca(state, allocSite), true /* isLocal */,
-                   allocSite);
+                   allocSite, false, nullptr, 0, false);
     } else {
       //klee_warning("Could not find allocation for lifetime end");
       terminateStateOnError(state, "Memory object is dead", Ptr);
@@ -2284,7 +2284,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
  
     // Memory instructions...
   case Instruction::Alloca: {
-    executeAlloc(state, getSizeForAlloca(state, ki), true, ki);
+    executeAlloc(state, getSizeForAlloca(state, ki), true, ki, false, 0, false, false);
     break;
   }
 
@@ -3300,6 +3300,7 @@ void Executor::callExternalFunction(ExecutionState &state,
   unsigned wordIndex = 2;
   for (std::vector<Cell>::const_iterator ai = arguments.begin(),
        ae = arguments.end(); ai!=ae; ++ai) {
+    void* address = nullptr;
     if (ExternalCalls == ExternalCallPolicy::All) { // don't bother checking uniqueness
       auto value = optimizer.optimizeExpr(ai->getValue(), true);
       ref<ConstantExpr> ce;
@@ -3308,11 +3309,16 @@ void Executor::callExternalFunction(ExecutionState &state,
       assert(success && "FIXME: Unhandled solver failure");
       ce->toMemory(&args[wordIndex]);
       ObjectPair op;
+
       // Checking to see if the argument is a pointer to something
       if (ce->getWidth() == Context::get().getPointerWidth()) {
         state.addressSpace.resolveOne(state, solver, *ai,
                                       op, success);
         if (success) {
+          address = memory->allocateMemory(op.first->allocatedSize, 8);
+          if (!address)
+            klee_error("Couldn't allocate memory for external function");
+
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
             terminateStateOnExecError(state,
@@ -3341,6 +3347,10 @@ void Executor::callExternalFunction(ExecutionState &state,
         bool success;
         state.addressSpace.resolveOne(state, solver, *ai, op, success);
         if (success) {
+          address = memory->allocateMemory(op.first->allocatedSize, Context::get().getPointerWidth());
+          if (!address)
+            klee_error("Couldn't allocate memory for external function");
+
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
             terminateStateOnExecError(state,
@@ -3355,9 +3365,11 @@ void Executor::callExternalFunction(ExecutionState &state,
       }
 
       ref<Expr> arg;
-      //if no MO was found, use address
-      if (op.first) {
-        arg = toUnique(state, op.first->getBaseExpr());
+      //if no MO was found, use ai value
+      if (address) {
+        if (op.first->address == 0)
+          const_cast<MemoryObject*>(op.first)->setAddressForExternalCall(reinterpret_cast<uint64_t>(address));
+        arg = toUnique(state, ConstantExpr::create(reinterpret_cast<uint64_t>(address), Context::get().getPointerWidth()));
       } else {
         arg = toUnique(state, ai->getValue());
       }
@@ -3506,7 +3518,8 @@ void Executor::executeAlloc(ExecutionState &state,
                             KInstruction *target,
                             bool zeroMemory,
                             const ObjectState *reallocFrom,
-                            size_t allocationAlignment) {
+                            size_t allocationAlignment,
+                            bool allocate) {
   size = optimizer.optimizeExpr(size, true);
   const llvm::Value *allocSite = state.prevPC->inst;
   if (allocationAlignment == 0) {
@@ -3514,7 +3527,7 @@ void Executor::executeAlloc(ExecutionState &state,
   }
   MemoryObject *mo =
       memory->allocate(size, isLocal, /*isGlobal=*/false,
-                       allocSite, allocationAlignment);
+                       allocSite, allocationAlignment, allocate);
   if (!mo) {
     bindLocal(target, state, 
               KValue(ConstantExpr::alloc(0, Context::get().getPointerWidth())));

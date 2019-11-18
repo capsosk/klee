@@ -101,9 +101,9 @@ public:
   MemoryObject *allocate(uint64_t size, bool isLocal, bool isGlobal,
                          const llvm::Value *allocSite, size_t alignment);
   MemoryObject *allocate(ref<Expr> size, bool isLocal, bool isGlobal,
-                         const llvm::Value *allocSite, size_t alignment, bool allocate = true);
-  MemoryObject *allocateFixed(uint64_t address, uint64_t size,
-                              const llvm::Value *allocSite);
+                         const llvm::Value *allocSite, size_t alignment);
+  MemoryObject *allocateFixed(uint64_t size,
+                              const llvm::Value *allocSite, uint64_t specialSegment = 0);
   void deallocate(const MemoryObject *mo);
   void markFreed(MemoryObject *mo);
   ArrayCache *getArrayCache() const { return arrayCache; }

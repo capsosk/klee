@@ -203,8 +203,8 @@ void ObjectStatePlane::flushToConcreteStore(TimingSolver *solver,
       bool success = solver->getValue(state, read8(i), ce);
       if (!success) {
         klee_warning("Solver timed out when getting a value for external call, "
-                     "byte %p+%u will have random value",
-                     (void *)parent->getObject()->address, i);
+                     "segment + offset %lu+%u will have random value",
+                     parent->getObject()->segment, i);
       } else {
         uint8_t value;
         ce->toMemory(&value);

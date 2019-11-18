@@ -624,13 +624,12 @@ void Executor::initializeGlobalObject(ExecutionState &state, ObjectState *os,
 }
 
 MemoryObject * Executor::addExternalObject(ExecutionState &state, 
-                                           void *addr, unsigned size, 
-                                           bool isReadOnly) {
-  auto mo = memory->allocateFixed(reinterpret_cast<std::uint64_t>(addr),
-                                  size, nullptr);
+                                           unsigned size,
+                                           bool isReadOnly, uint64_t specialSegment) {
+  auto mo = memory->allocateFixed(size, nullptr, specialSegment);
   ObjectState *os = bindObjectInState(state, mo, false);
   for(unsigned i = 0; i < size; i++)
-    os->write8(i, (uint8_t)0, ((uint8_t*)addr)[i]);
+    os->write8(i, (uint8_t)mo->segment, (uint8_t)0);
   if(isReadOnly)
     os->setReadOnly(true);  
   return mo;
@@ -669,7 +668,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
 #ifndef WINDOWS
   int *errno_addr = getErrnoLocation(state);
   MemoryObject *errnoObj =
-      addExternalObject(state, (void *)errno_addr, sizeof *errno_addr, false);
+      addExternalObject(state, sizeof *errno_addr, false, ERRNO_SEGMENT);
   // Copy values from and to program space explicitly
   errnoObj->isUserSpecified = true;
 #endif
@@ -682,6 +681,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
        These point into arrays of 384, so they can be indexed by any `unsigned
        char' value [0,255]; by EOF (-1); or by any `signed char' value
        [-128,-1).  ISO C requires that the ctype functions work for `unsigned */
+  /*
   const uint16_t **addr = __ctype_b_loc();
   addExternalObject(state, const_cast<uint16_t*>(*addr-128),
                     384 * sizeof **addr, true);
@@ -696,6 +696,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
   addExternalObject(state, const_cast<int32_t*>(*upper_addr-128),
                     384 * sizeof **upper_addr, true);
   addExternalObject(state, upper_addr, sizeof(*upper_addr), true);
+   */
 #endif
 #endif
 #endif
@@ -800,12 +801,20 @@ void Executor::initializeGlobals(ExecutionState &state) {
   // remember constant objects to initialise their counter part for external
   // calls
   std::vector<ObjectState *> constantObjects;
+  ConcreteAddressMap initializedMOs;
+
   for (Module::const_global_iterator i = m->global_begin(),
          e = m->global_end();
        i != e; ++i) {
     if (i->hasInitializer()) {
       const GlobalVariable *v = &*i;
       MemoryObject *mo = globalObjects.find(v)->second;
+#warning ///TODO: figure out alignment sizes
+      void *address = memory->allocateMemory(mo->allocatedSize, 8);
+      if (!address)
+        klee_error("Couldn't allocate memory for external function");
+
+      initializedMOs.emplace(mo->segment, (uint64_t)address);
       const ObjectState *os = state.addressSpace.findObject(mo);
       assert(os);
       ObjectState *wos = state.addressSpace.getWriteable(mo, os);
@@ -819,7 +828,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
   // initialise constant memory that is potentially used with external calls
   if (!constantObjects.empty()) {
     // initialise the actual memory with constant values
-    state.addressSpace.copyOutConcretes();
+    state.addressSpace.copyOutConcretes(initializedMOs);
 
     // mark constant objects as read-only
     for (auto obj : constantObjects)
@@ -1392,7 +1401,7 @@ void Executor::executeLifetimeIntrinsic(ExecutionState &state,
     // XXX: we should distringuish between resolve error and dead object...
     if (!isEnd) {
       executeAlloc(state, getSizeForAlloca(state, allocSite), true /* isLocal */,
-                   allocSite, false, nullptr, 0, false);
+                   allocSite, false, nullptr, 0);
     } else {
       //klee_warning("Could not find allocation for lifetime end");
       terminateStateOnError(state, "Memory object is dead", Ptr);
@@ -1612,7 +1621,7 @@ void Executor::executeCall(ExecutionState &state,
       }
 
       if (mo) {
-        if ((WordSize == Expr::Int64) && (mo->address & 15) &&
+        if ((WordSize == Expr::Int64) && /*(mo->address & 15) &&*/
             requires16ByteAlignment) {
           // Both 64bit Linux/Glibc and 64bit MacOSX should align to 16 bytes.
           klee_warning_once(
@@ -2284,7 +2293,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
  
     // Memory instructions...
   case Instruction::Alloca: {
-    executeAlloc(state, getSizeForAlloca(state, ki), true, ki, false, 0, false, false);
+    executeAlloc(state, getSizeForAlloca(state, ki), true, ki);
     break;
   }
 
@@ -3298,6 +3307,9 @@ void Executor::callExternalFunction(ExecutionState &state,
   uint64_t *args = (uint64_t*) alloca(2*sizeof(*args) * (arguments.size() + 1));
   memset(args, 0, 2 * sizeof(*args) * (arguments.size() + 1));
   unsigned wordIndex = 2;
+
+  ConcreteAddressMap resolvedMOs;
+
   for (std::vector<Cell>::const_iterator ai = arguments.begin(),
        ae = arguments.end(); ai!=ae; ++ai) {
     void* address = nullptr;
@@ -3315,9 +3327,12 @@ void Executor::callExternalFunction(ExecutionState &state,
         state.addressSpace.resolveOne(state, solver, *ai,
                                       op, success);
         if (success) {
-          address = memory->allocateMemory(op.first->allocatedSize, 8);
+#warning ///TODO: figure out alignment sizes
+          address = memory->allocateMemory(op.first->allocatedSize, Context::get().getPointerWidth());
           if (!address)
             klee_error("Couldn't allocate memory for external function");
+
+          resolvedMOs.emplace(op.first->segment, (uint64_t)address);
 
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
@@ -3347,9 +3362,11 @@ void Executor::callExternalFunction(ExecutionState &state,
         bool success;
         state.addressSpace.resolveOne(state, solver, *ai, op, success);
         if (success) {
+#warning ///TODO: figure out alignment sizes
           address = memory->allocateMemory(op.first->allocatedSize, Context::get().getPointerWidth());
           if (!address)
             klee_error("Couldn't allocate memory for external function");
+          resolvedMOs.emplace(op.first->segment, (uint64_t)address);
 
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
@@ -3367,8 +3384,6 @@ void Executor::callExternalFunction(ExecutionState &state,
       ref<Expr> arg;
       //if no MO was found, use ai value
       if (address) {
-        if (op.first->address == 0)
-          const_cast<MemoryObject*>(op.first)->setAddressForExternalCall(reinterpret_cast<uint64_t>(address));
         arg = toUnique(state, ConstantExpr::create(reinterpret_cast<uint64_t>(address), Context::get().getPointerWidth()));
       } else {
         arg = toUnique(state, ai->getValue());
@@ -3387,28 +3402,30 @@ void Executor::callExternalFunction(ExecutionState &state,
   }
 
   // Prepare external memory for invoking the function
-  state.addressSpace.copyOutConcretes();
+  state.addressSpace.copyOutConcretes(resolvedMOs, true);
 #ifndef WINDOWS
   // Update external errno state with local state value
   int *errno_addr = getErrnoLocation(state);
+
   ObjectPair result;
   // TODO segment
-  auto segment = ConstantExpr::create(0, Expr::Int64);
-  auto addr = ConstantExpr::create((uint64_t)errno_addr, Expr::Int64);
+  auto segment = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
+  auto offset = ConstantExpr::create(0, Expr::Int64);
   bool resolved;
   state.addressSpace.resolveOne(state, solver,
-                                KValue(segment, addr),
+                                KValue(segment, offset),
                                 result, resolved);
   if (!resolved)
     klee_error("Could not resolve memory object for errno");
-  auto errValueExpr = result.second->read(0, sizeof(*errno_addr) * 8);
-  ConstantExpr *errnoValue = dyn_cast<ConstantExpr>(errValueExpr.getValue());
-  if (!errnoValue) {
+
+  auto errnoValue = ConstantExpr::create(errno, sizeof(*errno_addr) * 8);
+
+  /*if (!errnoValue) {
     terminateStateOnExecError(state,
                               "external call with errno value symbolic: " +
                                   function->getName());
     return;
-  }
+  }*/
 
   externalDispatcher->setLastErrno(
       errnoValue->getZExtValue(sizeof(*errno_addr) * 8));
@@ -3444,7 +3461,7 @@ void Executor::callExternalFunction(ExecutionState &state,
     return;
   }
 
-  if (!state.addressSpace.copyInConcretes()) {
+  if (!state.addressSpace.copyInConcretes(resolvedMOs)) {
     terminateStateOnError(state, "external modified read-only object",
                           External);
     return;
@@ -3518,8 +3535,7 @@ void Executor::executeAlloc(ExecutionState &state,
                             KInstruction *target,
                             bool zeroMemory,
                             const ObjectState *reallocFrom,
-                            size_t allocationAlignment,
-                            bool allocate) {
+                            size_t allocationAlignment) {
   size = optimizer.optimizeExpr(size, true);
   const llvm::Value *allocSite = state.prevPC->inst;
   if (allocationAlignment == 0) {
@@ -3527,7 +3543,7 @@ void Executor::executeAlloc(ExecutionState &state,
   }
   MemoryObject *mo =
       memory->allocate(size, isLocal, /*isGlobal=*/false,
-                       allocSite, allocationAlignment, allocate);
+                       allocSite, allocationAlignment);
   if (!mo) {
     bindLocal(target, state, 
               KValue(ConstantExpr::alloc(0, Context::get().getPointerWidth())));
@@ -3666,23 +3682,26 @@ void Executor::executeMemoryOperation(ExecutionState &state,
                        toConstant(state, address.getOffset(), "max-sym-array-size"));
     }
 
-    bool useAddress = address.getSegment()->isZero() || isa<ConcatExpr>(address.getOffset());
+    ref<Expr> offset = address.getOffset();
 
-    ref<Expr> offset = mo->getOffsetExpr(address.getOffset(), useAddress);
+    ref<Expr> isEqualSegment = EqExpr::create(mo->getSegmentExpr(), address.getSegment());
+
     ref<Expr> check = mo->getBoundsCheckOffset(offset, bytes);
     check = optimizer.optimizeExpr(check, true);
 
     bool inBounds;
+    bool inBoundsSegment;
     solver->setTimeout(coreSolverTimeout);
+    bool successSegment = solver->mustBeTrue(state, isEqualSegment, inBoundsSegment);
     bool success = solver->mustBeTrue(state, check, inBounds);
     solver->setTimeout(time::Span());
-    if (!success) {
+    if (!success || !successSegment) {
       state.pc = state.prevPC;
       terminateStateEarly(state, "Query timed out (bounds check).");
       return;
     }
 
-    if (inBounds) {
+    if (inBoundsSegment && inBounds) {
       const ObjectState *os = op.second;
       if (isWrite) {
         if (os->readOnly) {

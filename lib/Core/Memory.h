@@ -46,7 +46,6 @@ private:
 public:
   unsigned id;
   uint64_t segment;
-  uint64_t address;
 
   /// size in bytes
   ref<Expr> size;
@@ -81,25 +80,23 @@ public:
 public:
   // XXX this is just a temp hack, should be removed
   explicit
-  MemoryObject(uint64_t _address) 
+  MemoryObject()
     : refCount(0),
       id(counter++),
       segment(0),
-      address(_address),
       size(0),
       isFixed(true),
       parent(NULL),
       allocSite(0) {
   }
 
-  MemoryObject(uint64_t _address, ref<Expr> _size,
+  MemoryObject(ref<Expr> _size,
                bool _isLocal, bool _isGlobal, bool _isFixed,
                const llvm::Value *_allocSite,
                MemoryManager *_parent)
     : refCount(0), 
       id(counter++),
       segment(0),
-      address(_address),
       size(ZExtExpr::create(_size, Context::get().getPointerWidth())),
       name("unnamed"),
       isLocal(_isLocal),
@@ -110,7 +107,7 @@ public:
       allocSite(_allocSite) {
   }
 
-    MemoryObject(uint64_t segment, uint64_t _address, ref<Expr> _size,
+    MemoryObject(uint64_t segment, ref<Expr> _size,
                  uint64_t _allocatedSize,
                bool _isLocal, bool _isGlobal, bool _isFixed,
                const llvm::Value *_allocSite,
@@ -118,7 +115,6 @@ public:
     : refCount(0),
       id(counter++),
       segment(segment),
-      address(_address),
       size(ZExtExpr::create(_size, Context::get().getPointerWidth())),
       allocatedSize(_allocatedSize),
       name("unnamed"),
@@ -138,23 +134,17 @@ public:
   void setName(std::string name) const {
     this->name = name;
   }
-  void setAddressForExternalCall(uint64_t newAddress) {
-    address = newAddress;
-  }
   uint64_t getSegment() const {
     return segment;
-  }
-  ref<ConstantExpr> getZeroExpr() const {
-    return ConstantExpr::create(0, Context::get().getPointerWidth());
   }
   ref<ConstantExpr> getSegmentExpr() const {
     return ConstantExpr::create(segment, Context::get().getPointerWidth());
   }
   ref<ConstantExpr> getBaseExpr() const { 
-    return ConstantExpr::create(address, Context::get().getPointerWidth());
+    return ConstantExpr::create(0, Context::get().getPointerWidth());
   }
   KValue getPointer() const {
-      return KValue(getSegmentExpr(), getZeroExpr());
+      return KValue(getSegmentExpr(), getBaseExpr());
   }
   KValue getPointer(uint64_t offset) const {
     return KValue(getSegmentExpr(), ConstantExpr::create(offset, Context::get().getPointerWidth()));
@@ -172,11 +162,8 @@ public:
   ref<Expr> getSizeExpr() const {
     return size;
   }
-  ref<Expr> getOffsetExpr(ref<Expr> pointer, bool useAddress = false) const {
-    if (useAddress)
-      return SubExpr::create(pointer, getBaseExpr());
-    else
-      return pointer;
+  ref<Expr> getOffsetExpr(ref<Expr> pointer) const {
+    return pointer;
   }
   ref<Expr> getBoundsCheckPointer(KValue pointer) const {
     return AndExpr::create(

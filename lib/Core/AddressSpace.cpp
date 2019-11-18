@@ -67,9 +67,9 @@ bool AddressSpace::resolveConstantAddress(const KValue &pointer,
       result = *objects.lookup(res->second);
       return true;
     }
-  } else {
+  /*} else {
     uint64_t address = cast<ConstantExpr>(pointer.getValue())->getZExtValue();
-    MemoryObject hack(address);
+    MemoryObject hack;
     if (const MemoryMap::value_type *res = objects.lookup_previous(&hack)) {
       const MemoryObject *mo = res->first;
       // objects with symbolic size can only be accessed through segmented pointers
@@ -83,7 +83,7 @@ bool AddressSpace::resolveConstantAddress(const KValue &pointer,
           return true;
         }
       }
-    }
+    }*/
   }
   return false;
 }
@@ -107,7 +107,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
     if (!segment->isZero()) {
       return resolveConstantAddress(KValue(segment, pointer.getOffset()), result);
     }
-
+    /*
     TimerStatIncrementer timer(stats::resolveTime);
 
     // try cheap search, will succeed for any inbounds pointer
@@ -130,9 +130,10 @@ bool AddressSpace::resolveOne(ExecutionState &state,
         }
       }
     }
+    */
 
     // didn't work, now we have to search
-       
+    MemoryObject hack;
     MemoryMap::iterator oi = objects.upper_bound(&hack);
     MemoryMap::iterator begin = objects.begin();
     MemoryMap::iterator end = objects.end();
@@ -293,8 +294,8 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
   ref<ConstantExpr> cex;
   if (!solver->getValue(state, pointer.getOffset(), cex))
     return true;
-  uint64_t example = cex->getZExtValue();
-  MemoryObject hack(example);
+  //uint64_t example = cex->getZExtValue();
+  MemoryObject hack;
 
   MemoryMap::iterator oi = objects.upper_bound(&hack);
   MemoryMap::iterator begin = objects.begin();
@@ -363,21 +364,25 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
 // transparently avoid screwing up symbolics (if the byte is symbolic
 // then its concrete cache byte isn't being used) but is just a hack.
 
-void AddressSpace::copyOutConcretes() {
-  for (MemoryMap::iterator it = objects.begin(), ie = objects.end(); 
+void AddressSpace::copyOutConcretes(const ConcreteAddressMap &resolved, bool ignoreReadOnly) {
+  for (MemoryMap::iterator it = objects.begin(), ie = objects.end();
        it != ie; ++it) {
     const MemoryObject *mo = it->first;
 
+    auto pair = resolved.find(mo->segment);
+    if (pair == resolved.end())
+      continue;
+
     if (!mo->isUserSpecified) {
       ObjectState *os = it->second;
-      auto address = reinterpret_cast<std::uint8_t*>(mo->address);
+      auto address = reinterpret_cast<std::uint8_t*>(pair->second);
 
       // if the allocated real virtual process' memory
       // is less that the size bound, do not try to write to it...
       if (os->getSizeBound() > mo->allocatedSize)
         continue;
 
-      if (!os->readOnly) {
+      if (!os->readOnly || ignoreReadOnly) {
         if (address) {
           auto &concreteStore = os->offsetPlane->concreteStore;
           concreteStore.resize(os->offsetPlane->sizeBound,
@@ -389,15 +394,18 @@ void AddressSpace::copyOutConcretes() {
   }
 }
 
-bool AddressSpace::copyInConcretes() {
+bool AddressSpace::copyInConcretes(const ConcreteAddressMap &resolved) {
   for (MemoryMap::iterator it = objects.begin(), ie = objects.end(); 
        it != ie; ++it) {
     const MemoryObject *mo = it->first;
+    auto pair = resolved.find(mo->segment);
+    if (pair == resolved.end())
+      continue;
 
     if (!mo->isUserSpecified) {
       const ObjectState *os = it->second;
 
-      if (mo->address && !copyInConcrete(mo, os, mo->address))
+      if (!copyInConcrete(mo, os, pair->second))
         return false;
     }
   }
@@ -406,8 +414,8 @@ bool AddressSpace::copyInConcretes() {
 }
 
 bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
-                                  uint64_t src_address) {
-  auto address = reinterpret_cast<std::uint8_t*>(src_address);
+                                  const uint64_t &resolvedAddress) {
+  auto address = reinterpret_cast<std::uint8_t*>(resolvedAddress);
   // TODO segment
   auto &concreteStoreR = os->offsetPlane->concreteStore;
   if (memcmp(address, concreteStoreR.data(), concreteStoreR.size())!=0) {
@@ -425,8 +433,6 @@ bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
 /***/
 
 bool MemoryObjectLT::operator()(const MemoryObject *a, const MemoryObject *b) const {
-  if (a->address && b->address)
-    return a->address < b->address;
-  return a->segment < b->segment;
+  return a->id < b->id;
 }
 

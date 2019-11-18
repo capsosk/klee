@@ -287,7 +287,7 @@ SpecialFunctionHandler::readStringAtAddress(ExecutionState &state,
   bool res __attribute__ ((unused));
   assert(executor.solver->mustBeTrue(state, 
                                      EqExpr::create(address.getOffset(),
-                                                    op.first->getZeroExpr()),
+                                                    op.first->getBaseExpr()),
                                      res) &&
          res &&
          "XXX interior pointer unhandled");
@@ -823,9 +823,8 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
          "expect constant size argument to klee_define_fixed_object");
 
   // TODO segment
-  uint64_t address = cast<ConstantExpr>(arguments[0].value)->getZExtValue();
   uint64_t size = cast<ConstantExpr>(arguments[1].value)->getZExtValue();
-  MemoryObject *mo = executor.memory->allocateFixed(address, size, state.prevPC->inst);
+  MemoryObject *mo = executor.memory->allocateFixed(size, state.prevPC->inst);
   executor.bindObjectInState(state, mo, false);
   mo->isUserSpecified = true; // XXX hack;
 }

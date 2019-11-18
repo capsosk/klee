@@ -35,6 +35,7 @@ namespace klee {
   
   typedef ImmutableMap<const MemoryObject*, ObjectHolder, MemoryObjectLT> MemoryMap;
   typedef ImmutableMap<uint64_t, const MemoryObject*> SegmentMap;
+  typedef std::map</*segment*/const uint64_t, /*address*/ const uint64_t> ConcreteAddressMap;
 
   class AddressSpace {
     friend class ExecutionState;
@@ -140,7 +141,7 @@ namespace klee {
 
     /// Copy the concrete values of all managed ObjectStates into the
     /// actual system memory location they were allocated at.
-    void copyOutConcretes();
+    void copyOutConcretes(const ConcreteAddressMap &resolved, bool ignoreReadOnly = false);
 
     /// Copy the concrete values of all managed ObjectStates back from
     /// the actual system memory location they were allocated
@@ -150,7 +151,7 @@ namespace klee {
     ///
     /// \retval true The copy succeeded. 
     /// \retval false The copy failed because a read-only object was modified.
-    bool copyInConcretes();
+    bool copyInConcretes(const ConcreteAddressMap &resolved);
 
     /// Updates the memory object with the raw memory from the address
     ///
@@ -159,7 +160,7 @@ namespace klee {
     /// @param src_address the address to copy from
     /// @return
     bool copyInConcrete(const MemoryObject *mo, const ObjectState *os,
-                        uint64_t src_address);
+                        const uint64_t &resolvedAddress);
   };
 } // End klee namespace
 

@@ -220,8 +220,6 @@ MemoryManager::MemoryManager(ArrayCache *_arrayCache, unsigned pointerWidth)
 MemoryManager::~MemoryManager() {
   while (!objects.empty()) {
     MemoryObject *mo = *objects.begin();
-    if (!mo->isFixed)
-      allocator.deallocate((void *)mo->address);
     objects.erase(mo);
     delete mo;
   }
@@ -238,7 +236,7 @@ MemoryObject *MemoryManager::allocate(uint64_t size, bool isLocal,
 MemoryObject *MemoryManager::allocate(ref<Expr> size, bool isLocal,
                                       bool isGlobal,
                                       const llvm::Value *allocSite,
-                                      size_t alignment, bool allocate) {
+                                      size_t alignment) {
   uint64_t concreteSize = 0;
   bool hasConcreteSize = false;
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(size)) {
@@ -270,23 +268,17 @@ MemoryObject *MemoryManager::allocate(ref<Expr> size, bool isLocal,
     // allocate 1 byte for symbolic-size allocation, just so we get an address
     concreteSize = hasConcreteSize ? concreteSize : 1;
   }
-  void *address = nullptr;
-  if(allocate) {
-    address = allocator.allocate(concreteSize, alignment);
-    if (!address)
-      return nullptr;
-  }
 
   ++stats::allocations;
-  MemoryObject *res = new MemoryObject(++lastSegment, reinterpret_cast<uint64_t>(address),
+  MemoryObject *res = new MemoryObject(++lastSegment,
                                        size, concreteSize,
                                        isLocal, isGlobal, false, allocSite, this);
   objects.insert(res);
   return res;
 }
 
-MemoryObject *MemoryManager::allocateFixed(uint64_t address, uint64_t size,
-                                           const llvm::Value *allocSite) {
+MemoryObject *MemoryManager::allocateFixed(uint64_t size,
+                                           const llvm::Value *allocSite, uint64_t specialSegment) {
 #ifndef NDEBUG
   for (objects_ty::iterator it = objects.begin(), ie = objects.end(); it != ie;
        ++it) {
@@ -294,16 +286,27 @@ MemoryObject *MemoryManager::allocateFixed(uint64_t address, uint64_t size,
     // symbolic size objects can overlap
     if (ConstantExpr *CE = dyn_cast<ConstantExpr>(mo->size)) {
       unsigned moSize = CE->getZExtValue();
-      if (address + moSize > mo->address && address < mo->address + moSize)
-        klee_error("Trying to allocate an overlapping object");
+      /* if (address + moSize > mo->address && address < mo->address + moSize)
+        klee_error("Trying to allocate an overlapping object"); */
     }
   }
 #endif
 
   ++stats::allocations;
   ref<Expr> sizeExpr = ConstantExpr::alloc(size, Context::get().getPointerWidth());
-  MemoryObject *res =
-      new MemoryObject(++lastSegment, address, sizeExpr, size, false, true, true, allocSite, this);
+  MemoryObject *res;
+
+  if (!specialSegment) {
+    res =
+        new MemoryObject(++lastSegment, sizeExpr, size,
+                         false, true, true, allocSite, this);
+  }
+  else {
+    res =
+        new MemoryObject(specialSegment, sizeExpr, size,
+                         false, true, true, allocSite, this);
+#warning /// TODO : check for overlapping segments here!
+  }
   objects.insert(res);
   return res;
 }
@@ -312,8 +315,6 @@ void MemoryManager::deallocate(const MemoryObject *mo) { assert(0); }
 
 void MemoryManager::markFreed(MemoryObject *mo) {
   if (objects.find(mo) != objects.end()) {
-    if (!mo->isFixed)
-      allocator.deallocate((void *)mo->address);
     objects.erase(mo);
   }
 }

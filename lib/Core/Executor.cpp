@@ -623,13 +623,16 @@ void Executor::initializeGlobalObject(ExecutionState &state, ObjectState *os,
   }
 }
 
-MemoryObject * Executor::addExternalObject(ExecutionState &state, 
-                                           unsigned size,
+MemoryObject * Executor::addExternalObject(ExecutionState &state,
+                                           void *addr, unsigned size,
                                            bool isReadOnly, uint64_t specialSegment) {
   auto mo = memory->allocateFixed(size, nullptr, specialSegment);
+
+  state.addressSpace.concreteAddressMap.insert({(uint64_t)addr, mo->segment});
+
   ObjectState *os = bindObjectInState(state, mo, false);
   for(unsigned i = 0; i < size; i++)
-    os->write8(i, (uint8_t)mo->segment, (uint8_t)0);
+    os->write8(i, (uint8_t)mo->segment, ((uint8_t*)addr)[i]);
   if(isReadOnly)
     os->setReadOnly(true);  
   return mo;
@@ -668,7 +671,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
 #ifndef WINDOWS
   int *errno_addr = getErrnoLocation(state);
   MemoryObject *errnoObj =
-      addExternalObject(state, sizeof *errno_addr, false, ERRNO_SEGMENT);
+      addExternalObject(state, errno_addr, sizeof *errno_addr, false, ERRNO_SEGMENT);
   // Copy values from and to program space explicitly
   errnoObj->isUserSpecified = true;
 #endif
@@ -681,7 +684,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
        These point into arrays of 384, so they can be indexed by any `unsigned
        char' value [0,255]; by EOF (-1); or by any `signed char' value
        [-128,-1).  ISO C requires that the ctype functions work for `unsigned */
-  /*
+
   const uint16_t **addr = __ctype_b_loc();
   addExternalObject(state, const_cast<uint16_t*>(*addr-128),
                     384 * sizeof **addr, true);
@@ -696,7 +699,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
   addExternalObject(state, const_cast<int32_t*>(*upper_addr-128),
                     384 * sizeof **upper_addr, true);
   addExternalObject(state, upper_addr, sizeof(*upper_addr), true);
-   */
+
 #endif
 #endif
 #endif
@@ -3307,8 +3310,8 @@ void Executor::callExternalFunction(ExecutionState &state,
   uint64_t *args = (uint64_t*) alloca(2*sizeof(*args) * (arguments.size() + 1));
   memset(args, 0, 2 * sizeof(*args) * (arguments.size() + 1));
   unsigned wordIndex = 2;
-
-  ConcreteAddressMap resolvedMOs;
+  typedef std::map</*segment*/const uint64_t, /*address*/ const uint64_t> SegmentAddressMap;
+  SegmentAddressMap resolvedMOs;
 
   for (std::vector<Cell>::const_iterator ai = arguments.begin(),
        ae = arguments.end(); ai!=ae; ++ai) {
@@ -3701,7 +3704,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
       return;
     }
 
-    if (inBoundsSegment && inBounds) {
+    if ((inBoundsSegment && inBounds) || op.first->isUserSpecified) {
       const ObjectState *os = op.second;
       if (isWrite) {
         if (os->readOnly) {

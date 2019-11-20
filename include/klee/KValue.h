@@ -20,9 +20,7 @@ enum SpecialSegment {
     VALUES_SEGMENT = 0,         // an ordinary numbers
     FUNCTIONS_SEGMENT = 2,      // functions
     ERRNO_SEGMENT = 10,
-    GLOBAL_SEGMENTS = 11,
-#warning ///TODO segments for global alloctions in Executor::addExternalObjects::685
-    FIRST_ORDINARY_SEGMENT = 20 // allocated memory (on stack, heap and globals)
+    FIRST_ORDINARY_SEGMENT = 11 // allocated memory (on stack, heap and globals)
 };
 
 

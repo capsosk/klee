@@ -239,7 +239,7 @@ private:
 
   // Given a concrete object in our [klee's] address space, add it to 
   // objects checked code can reference.
-  MemoryObject *addExternalObject(ExecutionState &state,
+  MemoryObject *addExternalObject(ExecutionState &state, void *addr,
                                   unsigned size, bool isReadOnly, uint64_t specialSegment = 0);
 
   void initializeGlobalObject(ExecutionState &state, ObjectState *os, 

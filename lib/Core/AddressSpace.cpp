@@ -60,6 +60,17 @@ ObjectState *AddressSpace::getWriteable(const MemoryObject *mo,
 bool AddressSpace::resolveConstantAddress(const KValue &pointer,
                                           ObjectPair &result) const {
   uint64_t segment = cast<ConstantExpr>(pointer.getSegment())->getZExtValue();
+  uint64_t address = 0;
+
+  if (isa<ConstantExpr>(pointer.getValue())) {
+    address = cast<ConstantExpr>(pointer.getValue())->getZExtValue();
+  }
+
+  if (segment == 0 && address != 0) {
+    const auto it = concreteAddressMap.find(address);
+    if (it != concreteAddressMap.end())
+      segment = it->second;
+  }
 
   if (segment != 0) {
     if (const SegmentMap::value_type *res = segmentMap.lookup(segment)) {
@@ -67,23 +78,6 @@ bool AddressSpace::resolveConstantAddress(const KValue &pointer,
       result = *objects.lookup(res->second);
       return true;
     }
-  /*} else {
-    uint64_t address = cast<ConstantExpr>(pointer.getValue())->getZExtValue();
-    MemoryObject hack;
-    if (const MemoryMap::value_type *res = objects.lookup_previous(&hack)) {
-      const MemoryObject *mo = res->first;
-      // objects with symbolic size can only be accessed through segmented pointers
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(mo->size)) {
-        unsigned size = CE->getZExtValue();
-        // Check if the provided address is between start and end of the object
-        // [mo->address, mo->address + mo->size) or the object is a 0-sized object.
-        if ((size==0 && address==mo->address) ||
-            (address - mo->address < size)) {
-          result = *res;
-          return true;
-        }
-      }
-    }*/
   }
   return false;
 }
@@ -107,30 +101,6 @@ bool AddressSpace::resolveOne(ExecutionState &state,
     if (!segment->isZero()) {
       return resolveConstantAddress(KValue(segment, pointer.getOffset()), result);
     }
-    /*
-    TimerStatIncrementer timer(stats::resolveTime);
-
-    // try cheap search, will succeed for any inbounds pointer
-
-    ref<ConstantExpr> cex;
-    if (!solver->getValue(state, pointer.getOffset(), cex))
-      return false;
-    uint64_t example = cex->getZExtValue();
-    MemoryObject hack(example);
-    const MemoryMap::value_type *res = objects.lookup_previous(&hack);
-    
-    if (res) {
-      const MemoryObject *mo = res->first;
-      // objects with symbolic size can only be accessed through segmented pointers
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(mo->size)) {
-        if (example - mo->address < CE->getZExtValue()) {
-          result = *res;
-          success = true;
-          return true;
-        }
-      }
-    }
-    */
 
     // didn't work, now we have to search
     MemoryObject hack;

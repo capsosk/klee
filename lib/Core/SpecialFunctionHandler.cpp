@@ -824,8 +824,10 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
 
   // TODO segment
   uint64_t size = cast<ConstantExpr>(arguments[1].value)->getZExtValue();
+  uint64_t address = cast<ConstantExpr>(arguments[0].value)->getZExtValue();
   MemoryObject *mo = executor.memory->allocateFixed(size, state.prevPC->inst);
   executor.bindObjectInState(state, mo, false);
+  state.addressSpace.concreteAddressMap.insert({address, mo->segment});
   mo->isUserSpecified = true; // XXX hack;
 }
 

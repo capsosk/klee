@@ -89,6 +89,14 @@ bool AddressSpace::resolveOne(ExecutionState &state,
                               bool &success) const {
   if (pointer.isConstant()) {
     success = resolveConstantAddress(pointer, result);
+    if (!success) {
+      ResolutionList resList;
+      resolveAddressWithOffset(state, solver, pointer, resList);
+      if (resList.size() == 1) {
+        success = true;
+        result = resList.at(0);
+      }
+    }
     return true;
   } else {
     ref<ConstantExpr> segment = dyn_cast<ConstantExpr>(pointer.getSegment());
@@ -163,42 +171,6 @@ bool AddressSpace::resolveOne(ExecutionState &state,
   }
 }
 
-int AddressSpace::checkPointerInObject(ExecutionState &state,
-                                       TimingSolver *solver,
-                                       const KValue& pointer,
-                                       const ObjectPair &op, ResolutionList &rl,
-                                       unsigned maxResolutions) const {
-  // XXX I think there is some query wasteage here?
-  // In the common case we can save one query if we ask
-  // mustBeTrue before mayBeTrue for the first result. easy
-  // to add I just want to have a nice symbolic test case first.
-  const MemoryObject *mo = op.first;
-  ref<Expr> inBounds = mo->getBoundsCheckPointer(pointer);
-  bool mayBeTrue;
-  if (!solver->mayBeTrue(state, inBounds, mayBeTrue)) {
-    return 1;
-  }
-
-  if (mayBeTrue) {
-    rl.push_back(op);
-
-    // fast path check
-    auto size = rl.size();
-    if (size == 1) {
-      bool mustBeTrue;
-      if (!solver->mustBeTrue(state, inBounds, mustBeTrue))
-        return 1;
-      if (mustBeTrue)
-        return 0;
-    }
-    else
-      if (size == maxResolutions)
-        return 1;
-  }
-
-  return 2;
-}
-
 bool AddressSpace::resolve(ExecutionState &state,
                            TimingSolver *solver,
                            const KValue &pointer,
@@ -244,88 +216,31 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
     return false;
   }
 
-  TimerStatIncrementer timer(stats::resolveTime);
-
-  // XXX in general this isn't exactly what we want... for
-  // a multiple resolution case (or for example, a \in {b,c,0})
-  // we want to find the first object, find a cex assuming
-  // not the first, find a cex assuming not the second...
-  // etc.
-
-  // XXX how do we smartly amortize the cost of checking to
-  // see if we need to keep searching up/down, in bad cases?
-  // maybe we don't care?
-
-  // XXX we really just need a smart place to start (although
-  // if its a known solution then the code below is guaranteed
-  // to hit the fast path with exactly 2 queries). we could also
-  // just get this by inspection of the expr.
-
-  ref<ConstantExpr> cex;
-  if (!solver->getValue(state, pointer.getOffset(), cex))
-    return true;
-  //uint64_t example = cex->getZExtValue();
-  MemoryObject hack;
-
-  MemoryMap::iterator oi = objects.upper_bound(&hack);
-  MemoryMap::iterator begin = objects.begin();
-  MemoryMap::iterator end = objects.end();
-
-  MemoryMap::iterator start = oi;
-
-  // XXX in the common case we can save one query if we ask
-  // mustBeTrue before mayBeTrue for the first result. easy
-  // to add I just want to have a nice symbolic test case first.
-
-  // search backwards, start with one minus because this
-  // is the object that p *should* be within, which means we
-  // get write off the end with 4 queries (XXX can be better,
-  // no?)
-    while (oi!=begin) {
-      --oi;
-      const MemoryObject *mo = oi->first;
-      if (timeout && timeout < timer.delta())
-        return true;
-
-      int incomplete =
-          checkPointerInObject(state, solver, pointer,
-                               *oi, rl, maxResolutions);
-      if (incomplete != 2)
-        return incomplete ? true : false;
-
-
-      bool mustBeTrue;
-      if (!solver->mustBeTrue(state, UgeExpr::create(pointer.getOffset(),
-                                                     mo->getBaseExpr()),
-                              mustBeTrue))
-        return true;
-      if (mustBeTrue)
-         break;
-    }
-
-    // search forwards
-    for (oi = start; oi != end; ++oi) {
-      const MemoryObject *mo = oi->first;
-      if (timeout && timeout < timer.delta())
-        return true;
-
-      bool mustBeTrue;
-      if (!solver->mustBeTrue(state,
-                              UltExpr::create(pointer.getOffset(),
-                                              mo->getBaseExpr()),
-                              mustBeTrue))
-        return true;
-      if (mustBeTrue)
-        break;
-
-      int incomplete =
-          checkPointerInObject(state, solver, pointer,
-                               *oi, rl, maxResolutions);
-      if (incomplete != 2)
-        return incomplete ? true : false;
-    }
+  resolveAddressWithOffset(state, solver, pointer, rl);
 
   return false;
+}
+void AddressSpace::resolveAddressWithOffset(const ExecutionState &state,
+                                            TimingSolver *solver,
+                                            const KValue &pointer,
+                                            ResolutionList &rl) const {
+  ObjectPair op;
+  for (const auto pair: concreteAddressMap) {
+    auto segment = pair.second;
+    const auto *res = segmentMap.lookup(segment);
+
+    if (!res)
+      continue;
+
+    op = *objects.lookup(res->second);
+    auto offset = SubExpr::alloc(pointer.getOffset(), ConstantExpr::alloc(pair.first, Expr::Int64));
+    auto check = op.first->getBoundsCheckOffset(offset);
+    bool mayBeTrue = false;
+    if (solver->mayBeTrue(state, check, mayBeTrue)) {
+      if (mayBeTrue)
+        rl.push_back(op);
+    }
+  }
 }
 
 // These two are pretty big hack so we can sort of pass memory back

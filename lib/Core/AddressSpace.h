@@ -47,18 +47,6 @@ namespace klee {
     /// Unsupported, use copy constructor
     AddressSpace &operator=(const AddressSpace &);
 
-    /// Check if pointer `p` can point to the memory object in the
-    /// given object pair.  If so, add it to the given resolution list.
-    ///
-    /// \return 1 iff the resolution is incomplete (`maxResolutions`
-    /// is non-zero and it was reached, or a query timed out), 0 iff
-    /// the resolution is complete (`p` can only point to the given
-    /// memory object), and 2 otherwise.
-    int checkPointerInObject(ExecutionState &state, TimingSolver *solver,
-                             const KValue& pointer,
-                             const ObjectPair &op,
-                             ResolutionList &rl, unsigned maxResolutions) const;
-
   public:
     /// The MemoryObject -> ObjectState map that constitutes the
     /// address space.
@@ -163,6 +151,10 @@ namespace klee {
     /// @return
     bool copyInConcrete(const MemoryObject *mo, const ObjectState *os,
                         const uint64_t &resolvedAddress);
+    void resolveAddressWithOffset(const ExecutionState &state,
+                                  TimingSolver *solver,
+                                  const KValue &pointer,
+                                  ResolutionList &rl) const;
   };
 } // End klee namespace
 

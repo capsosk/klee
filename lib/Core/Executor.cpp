@@ -812,8 +812,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
     if (i->hasInitializer()) {
       const GlobalVariable *v = &*i;
       MemoryObject *mo = globalObjects.find(v)->second;
-#warning ///TODO: figure out alignment sizes
-      void *address = memory->allocateMemory(mo->allocatedSize, 8);
+      void *address = memory->allocateMemory(mo->allocatedSize, getAllocationAlignment(mo->allocSite));
       if (!address)
         klee_error("Couldn't allocate memory for external function");
 
@@ -3330,8 +3329,7 @@ void Executor::callExternalFunction(ExecutionState &state,
         state.addressSpace.resolveOne(state, solver, *ai,
                                       op, success);
         if (success) {
-#warning ///TODO: figure out alignment sizes
-          address = memory->allocateMemory(op.first->allocatedSize, Context::get().getPointerWidth());
+          address = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
           if (!address)
             klee_error("Couldn't allocate memory for external function");
 
@@ -3365,8 +3363,7 @@ void Executor::callExternalFunction(ExecutionState &state,
         bool success;
         state.addressSpace.resolveOne(state, solver, *ai, op, success);
         if (success) {
-#warning ///TODO: figure out alignment sizes
-          address = memory->allocateMemory(op.first->allocatedSize, Context::get().getPointerWidth());
+          address = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
           if (!address)
             klee_error("Couldn't allocate memory for external function");
           resolvedMOs.emplace(op.first->segment, (uint64_t)address);

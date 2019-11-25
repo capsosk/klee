@@ -305,7 +305,6 @@ MemoryObject *MemoryManager::allocateFixed(uint64_t size,
     res =
         new MemoryObject(specialSegment, sizeExpr, size,
                          false, true, true, allocSite, this);
-#warning /// TODO : check for overlapping segments here!
   }
   objects.insert(res);
   return res;

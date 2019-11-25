@@ -192,9 +192,7 @@ public:
 
 private:
   ref<Expr> getBoundsCheckSegment(ref<Expr> segment) const {
-    return OrExpr::create(
-            EqExpr::create(segment, ConstantExpr::alloc(0, segment->getWidth())),
-            EqExpr::create(getSegmentExpr(), segment));
+    return EqExpr::create(getSegmentExpr(), segment);
   }
 };
 

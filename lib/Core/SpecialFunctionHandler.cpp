@@ -824,7 +824,14 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
 
   // TODO segment
   uint64_t size = cast<ConstantExpr>(arguments[1].value)->getZExtValue();
-  uint64_t address = cast<ConstantExpr>(arguments[0].value)->getZExtValue();
+  ref<ConstantExpr> addressExpr = cast<ConstantExpr>(arguments[0].value);
+  uint64_t address = addressExpr->getZExtValue();
+
+  ResolutionList rl;
+  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl);
+  if (!rl.empty())
+    klee_error("Trying to allocate an overlapping object");
+
   MemoryObject *mo = executor.memory->allocateFixed(size, state.prevPC->inst);
   executor.bindObjectInState(state, mo, false);
   state.addressSpace.concreteAddressMap.insert({address, mo->segment});

@@ -91,7 +91,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
     success = resolveConstantAddress(pointer, result);
     if (!success) {
       ResolutionList resList;
-      resolveAddressWithOffset(state, solver, pointer, resList);
+      resolveAddressWithOffset(state, solver, pointer.getOffset(), resList);
       if (resList.size() == 1) {
         success = true;
         result = resList.at(0);
@@ -215,15 +215,18 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
       rl.push_back(res);
     return false;
   }
-
-  resolveAddressWithOffset(state, solver, pointer, rl);
+  
+  resolveAddressWithOffset(state, solver, pointer.getOffset(), rl);
 
   return false;
 }
 void AddressSpace::resolveAddressWithOffset(const ExecutionState &state,
                                             TimingSolver *solver,
-                                            const KValue &pointer,
+                                            const ref<Expr> &address,
                                             ResolutionList &rl) const {
+  if(!isa<ConstantExpr>(address))
+    return;
+
   ObjectPair op;
   for (const auto pair: concreteAddressMap) {
     auto segment = pair.second;
@@ -233,7 +236,7 @@ void AddressSpace::resolveAddressWithOffset(const ExecutionState &state,
       continue;
 
     op = *objects.lookup(res->second);
-    auto offset = SubExpr::alloc(pointer.getOffset(), ConstantExpr::alloc(pair.first, Expr::Int64));
+    auto offset = SubExpr::alloc(address, ConstantExpr::alloc(pair.first, Expr::Int64));
     auto check = op.first->getBoundsCheckOffset(offset);
     bool mayBeTrue = false;
     if (solver->mayBeTrue(state, check, mayBeTrue)) {

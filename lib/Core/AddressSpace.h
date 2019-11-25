@@ -151,9 +151,15 @@ namespace klee {
     /// @return
     bool copyInConcrete(const MemoryObject *mo, const ObjectState *os,
                         const uint64_t &resolvedAddress);
+
+    /// Checks if address can be found within bounds of concrete addresses in AddressSpace::concreteAddressMap
+    /// \param state
+    /// \param solver
+    /// \param address contains constant address which we are looking for
+    /// \param rl ResolutionList containing found ObjectPairs
     void resolveAddressWithOffset(const ExecutionState &state,
                                   TimingSolver *solver,
-                                  const KValue &pointer,
+                                  const ref<Expr> &address,
                                   ResolutionList &rl) const;
   };
 } // End klee namespace

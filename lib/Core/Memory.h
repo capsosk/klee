@@ -144,7 +144,7 @@ public:
     return ConstantExpr::create(0, Context::get().getPointerWidth());
   }
   KValue getPointer() const {
-      return KValue(getSegmentExpr(), getBaseExpr());
+    return KValue(getSegmentExpr(), getBaseExpr());
   }
   KValue getPointer(uint64_t offset) const {
     return KValue(getSegmentExpr(), ConstantExpr::create(offset, Context::get().getPointerWidth()));
@@ -162,18 +162,15 @@ public:
   ref<Expr> getSizeExpr() const {
     return size;
   }
-  ref<Expr> getOffsetExpr(ref<Expr> pointer) const {
-    return pointer;
-  }
   ref<Expr> getBoundsCheckPointer(KValue pointer) const {
     return AndExpr::create(
             getBoundsCheckSegment(pointer.getSegment()),
-            getBoundsCheckOffset(getOffsetExpr(pointer.getOffset())));
+            getBoundsCheckOffset(pointer.getOffset()));
   }
   ref<Expr> getBoundsCheckPointer(KValue pointer, unsigned bytes) const {
     return AndExpr::create(
             getBoundsCheckSegment(pointer.getSegment()),
-            getBoundsCheckOffset(getOffsetExpr(pointer.getOffset()), bytes));
+            getBoundsCheckOffset(pointer.getOffset(), bytes));
   }
   ref<Expr> getBoundsCheckOffset(ref<Expr> offset) const {
     if (isa<ConstantExpr>(size) && cast<ConstantExpr>(size)->isZero()) {

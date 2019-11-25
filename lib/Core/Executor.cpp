@@ -1623,8 +1623,7 @@ void Executor::executeCall(ExecutionState &state,
       }
 
       if (mo) {
-        if ((WordSize == Expr::Int64) && /*(mo->address & 15) &&*/
-            requires16ByteAlignment) {
+        if ((WordSize == Expr::Int64) && requires16ByteAlignment) {
           // Both 64bit Linux/Glibc and 64bit MacOSX should align to 16 bytes.
           klee_warning_once(
               0, "While allocating varargs: malloc did not align to 16 bytes.");
@@ -3420,13 +3419,6 @@ void Executor::callExternalFunction(ExecutionState &state,
 
   auto errnoValue = ConstantExpr::create(errno, sizeof(*errno_addr) * 8);
 
-  /*if (!errnoValue) {
-    terminateStateOnExecError(state,
-                              "external call with errno value symbolic: " +
-                                  function->getName());
-    return;
-  }*/
-
   externalDispatcher->setLastErrno(
       errnoValue->getZExtValue(sizeof(*errno_addr) * 8));
 #endif
@@ -3686,14 +3678,14 @@ void Executor::executeMemoryOperation(ExecutionState &state,
 
     ref<Expr> isEqualSegment = EqExpr::create(mo->getSegmentExpr(), address.getSegment());
 
-    ref<Expr> check = mo->getBoundsCheckOffset(offset, bytes);
-    check = optimizer.optimizeExpr(check, true);
+    ref<Expr> isOffsetInBounds = mo->getBoundsCheckOffset(offset, bytes);
+    isOffsetInBounds = optimizer.optimizeExpr(isOffsetInBounds, true);
 
-    bool inBounds;
+    bool inBoundsOffset;
     bool inBoundsSegment;
     solver->setTimeout(coreSolverTimeout);
     bool successSegment = solver->mustBeTrue(state, isEqualSegment, inBoundsSegment);
-    bool success = solver->mustBeTrue(state, check, inBounds);
+    bool success = solver->mustBeTrue(state, isOffsetInBounds, inBoundsOffset);
     solver->setTimeout(time::Span());
     if (!success || !successSegment) {
       state.pc = state.prevPC;
@@ -3701,7 +3693,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
       return;
     }
 
-    if ((inBoundsSegment && inBounds) || op.first->isUserSpecified) {
+    if ((inBoundsSegment && inBoundsOffset) || op.first->isUserSpecified) {
       const ObjectState *os = op.second;
       if (isWrite) {
         if (os->readOnly) {
@@ -3757,10 +3749,10 @@ void Executor::executeMemoryOperation(ExecutionState &state,
         } else {
           ObjectState *wos = bound->addressSpace.getWriteable(mo, os);
           // TODO segment
-          wos->write(mo->getOffsetExpr(optimAddress.getOffset()), value);
+          wos->write(optimAddress.getOffset(), value);
         }
       } else {
-        KValue result = os->read(mo->getOffsetExpr(optimAddress.getOffset()), type);
+        KValue result = os->read(optimAddress.getOffset(), type);
         bindLocal(target, *bound, result);
       }
     }

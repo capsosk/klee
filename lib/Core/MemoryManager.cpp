@@ -279,19 +279,6 @@ MemoryObject *MemoryManager::allocate(ref<Expr> size, bool isLocal,
 
 MemoryObject *MemoryManager::allocateFixed(uint64_t size,
                                            const llvm::Value *allocSite, uint64_t specialSegment) {
-#ifndef NDEBUG
-  for (objects_ty::iterator it = objects.begin(), ie = objects.end(); it != ie;
-       ++it) {
-    MemoryObject *mo = *it;
-    // symbolic size objects can overlap
-    if (ConstantExpr *CE = dyn_cast<ConstantExpr>(mo->size)) {
-      unsigned moSize = CE->getZExtValue();
-      /* if (address + moSize > mo->address && address < mo->address + moSize)
-        klee_error("Trying to allocate an overlapping object"); */
-    }
-  }
-#endif
-
   ++stats::allocations;
   ref<Expr> sizeExpr = ConstantExpr::alloc(size, Context::get().getPointerWidth());
   MemoryObject *res;

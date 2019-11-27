@@ -35,7 +35,8 @@ namespace klee {
   
   typedef ImmutableMap<const MemoryObject*, ObjectHolder, MemoryObjectLT> MemoryMap;
   typedef ImmutableMap<uint64_t, const MemoryObject*> SegmentMap;
-  typedef std::map</*address*/ const uint64_t, /*segment*/const uint64_t> ConcreteAddressMap;
+  typedef std::map</*address*/ const uint64_t, /*segment*/ const uint64_t> ConcreteAddressMap;
+  typedef std::map</*segment*/ const uint64_t, /*address*/ const uint64_t> SegmentAddressMap;
 
   class AddressSpace {
     friend class ExecutionState;
@@ -67,6 +68,8 @@ namespace klee {
       objects(b.objects),
       segmentMap(b.segmentMap) { }
     ~AddressSpace() {}
+
+    bool resolveInConcreteMap(const uint64_t &segment, uint64_t &address) const;
 
     bool resolveConstantAddress(const KValue &pointer,
                                 ObjectPair &result) const;
@@ -131,7 +134,7 @@ namespace klee {
 
     /// Copy the concrete values of all managed ObjectStates into the
     /// actual system memory location they were allocated at.
-    void copyOutConcretes(const ConcreteAddressMap &resolved, bool ignoreReadOnly = false);
+    void copyOutConcretes(const SegmentAddressMap &resolved, bool ignoreReadOnly = false);
 
     /// Copy the concrete values of all managed ObjectStates back from
     /// the actual system memory location they were allocated
@@ -141,7 +144,7 @@ namespace klee {
     ///
     /// \retval true The copy succeeded. 
     /// \retval false The copy failed because a read-only object was modified.
-    bool copyInConcretes(const ConcreteAddressMap &resolved);
+    bool copyInConcretes(const SegmentAddressMap &resolved);
 
     /// Updates the memory object with the raw memory from the address
     ///
@@ -160,7 +163,7 @@ namespace klee {
     void resolveAddressWithOffset(const ExecutionState &state,
                                   TimingSolver *solver,
                                   const ref<Expr> &address,
-                                  ResolutionList &rl) const;
+                                  ResolutionList &rl, uint64_t& offset) const;
   };
 } // End klee namespace
 

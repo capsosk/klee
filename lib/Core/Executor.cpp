@@ -627,9 +627,7 @@ MemoryObject * Executor::addExternalObject(ExecutionState &state,
                                            void *addr, unsigned size,
                                            bool isReadOnly, uint64_t specialSegment) {
   auto mo = memory->allocateFixed(size, nullptr, specialSegment);
-
-  state.addressSpace.concreteAddressMap.insert({(uint64_t)addr, mo->segment});
-
+  state.addressSpace.concreteAddressMap.insert({reinterpret_cast<uint64_t>(addr), mo->segment});
   ObjectState *os = bindObjectInState(state, mo, false);
   for(unsigned i = 0; i < size; i++)
     os->write8(i, (uint8_t)mo->segment, ((uint8_t*)addr)[i]);
@@ -804,7 +802,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
   // remember constant objects to initialise their counter part for external
   // calls
   std::vector<ObjectState *> constantObjects;
-  ConcreteAddressMap initializedMOs;
+  SegmentAddressMap initializedMOs;
 
   for (Module::const_global_iterator i = m->global_begin(),
          e = m->global_end();
@@ -816,7 +814,10 @@ void Executor::initializeGlobals(ExecutionState &state) {
       if (!address)
         klee_error("Couldn't allocate memory for external function");
 
-      initializedMOs.emplace(mo->segment, (uint64_t)address);
+      initializedMOs.insert({mo->segment, reinterpret_cast<uint64_t>(address)});
+      state.addressSpace.concreteAddressMap.insert({reinterpret_cast<uint64_t>(address), mo->getSegment()});
+      state.addressSpace.segmentMap.replace(std::make_pair(mo->getSegment(), mo));
+
       const ObjectState *os = state.addressSpace.findObject(mo);
       assert(os);
       ObjectState *wos = state.addressSpace.getWriteable(mo, os);
@@ -3308,12 +3309,11 @@ void Executor::callExternalFunction(ExecutionState &state,
   uint64_t *args = (uint64_t*) alloca(2*sizeof(*args) * (arguments.size() + 1));
   memset(args, 0, 2 * sizeof(*args) * (arguments.size() + 1));
   unsigned wordIndex = 2;
-  typedef std::map</*segment*/const uint64_t, /*address*/ const uint64_t> SegmentAddressMap;
   SegmentAddressMap resolvedMOs;
 
   for (std::vector<Cell>::const_iterator ai = arguments.begin(),
        ae = arguments.end(); ai!=ae; ++ai) {
-    void* address = nullptr;
+    uint64_t address = 0;
     if (ExternalCalls == ExternalCallPolicy::All) { // don't bother checking uniqueness
       auto value = optimizer.optimizeExpr(ai->getValue(), true);
       ref<ConstantExpr> ce;
@@ -3328,11 +3328,14 @@ void Executor::callExternalFunction(ExecutionState &state,
         state.addressSpace.resolveOne(state, solver, *ai,
                                       op, success);
         if (success) {
-          address = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
-          if (!address)
-            klee_error("Couldn't allocate memory for external function");
-
-          resolvedMOs.emplace(op.first->segment, (uint64_t)address);
+          auto found = state.addressSpace.resolveInConcreteMap(op.first->segment, address);
+          if (!found) {
+            void* addr = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
+            if (!addr)
+              klee_error("Couldn't allocate memory for external function");
+            address = reinterpret_cast<uint64_t>(addr);
+          }
+          resolvedMOs.insert({op.first->segment, address});
 
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
@@ -3362,10 +3365,15 @@ void Executor::callExternalFunction(ExecutionState &state,
         bool success;
         state.addressSpace.resolveOne(state, solver, *ai, op, success);
         if (success) {
-          address = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
-          if (!address)
-            klee_error("Couldn't allocate memory for external function");
-          resolvedMOs.emplace(op.first->segment, (uint64_t)address);
+          auto found = state.addressSpace.resolveInConcreteMap(op.first->segment, address);
+          if (!found) {
+            void* addr = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
+            if (!addr)
+              klee_error("Couldn't allocate memory for external function");
+            address = reinterpret_cast<uint64_t>(addr);
+          }
+
+          resolvedMOs.insert({op.first->segment, address});
 
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
@@ -3407,7 +3415,6 @@ void Executor::callExternalFunction(ExecutionState &state,
   int *errno_addr = getErrnoLocation(state);
 
   ObjectPair result;
-  // TODO segment
   auto segment = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
   auto offset = ConstantExpr::create(0, Expr::Int64);
   bool resolved;
@@ -3693,7 +3700,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
       return;
     }
 
-    if ((inBoundsSegment && inBoundsOffset) || op.first->isUserSpecified) {
+    if (inBoundsSegment && inBoundsOffset) {
       const ObjectState *os = op.second;
       if (isWrite) {
         if (os->readOnly) {
@@ -3705,7 +3712,16 @@ void Executor::executeMemoryOperation(ExecutionState &state,
         }          
       } else {
         KValue result = os->read(offset, type);
-        
+
+        if (result.value.get()->getWidth() == Context::get().getPointerWidth() && isa<ConstantExpr>(result.getSegment()) && cast<ConstantExpr>(result.getSegment())->getZExtValue() == 0) {
+          ResolutionList rl;
+          uint64_t calculatedOffset = 0;
+          state.addressSpace.resolveAddressWithOffset(state, solver, result.getValue(), rl, calculatedOffset);
+          if (!rl.empty()) {
+            result = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset, Expr::Int64));
+          }
+        }
+
         if (interpreterOpts.MakeConcreteSymbolic) {
           result = KValue(replaceReadWithSymbolic(state, result.getSegment()),
                           replaceReadWithSymbolic(state, result.getOffset()));

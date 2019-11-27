@@ -55,7 +55,17 @@ ObjectState *AddressSpace::getWriteable(const MemoryObject *mo,
   }
 }
 
-/// 
+bool AddressSpace::resolveInConcreteMap(const uint64_t& segment, uint64_t &address) const {
+  auto found = std::find_if(concreteAddressMap.begin(),concreteAddressMap.end(),
+      [segment](std::pair<const uint64_t&, const uint64_t&> value) {
+    return value.second == segment;
+  });
+  if (found != concreteAddressMap.end()) {
+    address = found->first;
+    return true;
+  }
+  return false;
+}
 
 bool AddressSpace::resolveConstantAddress(const KValue &pointer,
                                           ObjectPair &result) const {
@@ -91,7 +101,8 @@ bool AddressSpace::resolveOne(ExecutionState &state,
     success = resolveConstantAddress(pointer, result);
     if (!success) {
       ResolutionList resList;
-      resolveAddressWithOffset(state, solver, pointer.getOffset(), resList);
+      uint64_t tmp;
+      resolveAddressWithOffset(state, solver, pointer.getOffset(), resList, tmp);
       if (resList.size() == 1) {
         success = true;
         result = resList.at(0);
@@ -215,33 +226,37 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
       rl.push_back(res);
     return false;
   }
-  
-  resolveAddressWithOffset(state, solver, pointer.getOffset(), rl);
+  uint64_t tmp;
+  resolveAddressWithOffset(state, solver, pointer.getOffset(), rl, tmp);
 
   return false;
 }
 void AddressSpace::resolveAddressWithOffset(const ExecutionState &state,
                                             TimingSolver *solver,
                                             const ref<Expr> &address,
-                                            ResolutionList &rl) const {
-  if(!isa<ConstantExpr>(address))
+                                            ResolutionList &rl, uint64_t& offset) const {
+  ConstantExpr* value = dyn_cast<ConstantExpr>(address);
+  if (!value)
     return;
 
   ObjectPair op;
   for (const auto pair: concreteAddressMap) {
-    auto segment = pair.second;
-    const auto *res = segmentMap.lookup(segment);
+    const auto& resolvedAddress = pair.first;
+    const auto& resolvedSegment = pair.second;
+    const auto *res = segmentMap.lookup(resolvedSegment);
 
     if (!res)
       continue;
 
     op = *objects.lookup(res->second);
-    auto offset = SubExpr::alloc(address, ConstantExpr::alloc(pair.first, Expr::Int64));
-    auto check = op.first->getBoundsCheckOffset(offset);
+    auto subexpr = SubExpr::alloc(address, ConstantExpr::alloc(resolvedAddress, Context::get().getPointerWidth()));
+    auto check = op.first->getBoundsCheckOffset(subexpr);
     bool mayBeTrue = false;
     if (solver->mayBeTrue(state, check, mayBeTrue)) {
-      if (mayBeTrue)
+      if (mayBeTrue) {
         rl.push_back(op);
+        offset = cast<ConstantExpr>(address)->getZExtValue() - resolvedAddress;
+      }
     }
   }
 }
@@ -252,7 +267,7 @@ void AddressSpace::resolveAddressWithOffset(const ExecutionState &state,
 // transparently avoid screwing up symbolics (if the byte is symbolic
 // then its concrete cache byte isn't being used) but is just a hack.
 
-void AddressSpace::copyOutConcretes(const ConcreteAddressMap &resolved, bool ignoreReadOnly) {
+void AddressSpace::copyOutConcretes(const SegmentAddressMap &resolved, bool ignoreReadOnly) {
   for (MemoryMap::iterator it = objects.begin(), ie = objects.end();
        it != ie; ++it) {
     const MemoryObject *mo = it->first;
@@ -275,6 +290,7 @@ void AddressSpace::copyOutConcretes(const ConcreteAddressMap &resolved, bool ign
           auto &concreteStore = os->offsetPlane->concreteStore;
           concreteStore.resize(os->offsetPlane->sizeBound,
                                os->offsetPlane->initialValue);
+
           memcpy(address, concreteStore.data(), concreteStore.size());
         }
       }
@@ -282,7 +298,7 @@ void AddressSpace::copyOutConcretes(const ConcreteAddressMap &resolved, bool ign
   }
 }
 
-bool AddressSpace::copyInConcretes(const ConcreteAddressMap &resolved) {
+bool AddressSpace::copyInConcretes(const SegmentAddressMap &resolved) {
   for (MemoryMap::iterator it = objects.begin(), ie = objects.end(); 
        it != ie; ++it) {
     const MemoryObject *mo = it->first;
@@ -303,7 +319,7 @@ bool AddressSpace::copyInConcretes(const ConcreteAddressMap &resolved) {
 
 bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
                                   const uint64_t &resolvedAddress) {
-  auto address = reinterpret_cast<std::uint8_t*>(resolvedAddress);
+  auto address = reinterpret_cast<uint8_t*>(resolvedAddress);
   // TODO segment
   auto &concreteStoreR = os->offsetPlane->concreteStore;
   if (memcmp(address, concreteStoreR.data(), concreteStoreR.size())!=0) {

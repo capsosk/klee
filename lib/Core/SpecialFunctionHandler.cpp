@@ -828,13 +828,15 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
   uint64_t address = addressExpr->getZExtValue();
 
   ResolutionList rl;
-  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl);
+  uint64_t tmp;
+  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl, tmp);
   if (!rl.empty())
     klee_error("Trying to allocate an overlapping object");
 
   MemoryObject *mo = executor.memory->allocateFixed(size, state.prevPC->inst);
   executor.bindObjectInState(state, mo, false);
   state.addressSpace.concreteAddressMap.insert({address, mo->segment});
+  state.addressSpace.segmentMap.insert(std::make_pair(mo->segment, mo));
   mo->isUserSpecified = true; // XXX hack;
 }
 

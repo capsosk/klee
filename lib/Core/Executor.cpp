@@ -1398,7 +1398,8 @@ void Executor::executeLifetimeIntrinsic(ExecutionState &state,
                                         bool isEnd) {
   ObjectPair op;
   bool success;
-  state.addressSpace.resolveOne(state, solver, address, op, success);
+  uint64_t temp;
+  state.addressSpace.resolveOne(state, solver, address, op, success, temp);
   if (!success) {
     // the object is dead, create a new one
     // XXX: we should distringuish between resolve error and dead object...
@@ -3325,8 +3326,9 @@ void Executor::callExternalFunction(ExecutionState &state,
 
       // Checking to see if the argument is a pointer to something
       if (ce->getWidth() == Context::get().getPointerWidth()) {
+        uint64_t temp;
         state.addressSpace.resolveOne(state, solver, *ai,
-                                      op, success);
+                                      op, success, temp);
         if (success) {
           auto found = state.addressSpace.resolveInConcreteMap(op.first->segment, address);
           if (!found) {
@@ -3363,7 +3365,8 @@ void Executor::callExternalFunction(ExecutionState &state,
           ai->getOffset()->getWidth() == Context::get().getPointerWidth()) {
 
         bool success;
-        state.addressSpace.resolveOne(state, solver, *ai, op, success);
+        uint64_t temp;
+        state.addressSpace.resolveOne(state, solver, *ai, op, success, temp);
         if (success) {
           auto found = state.addressSpace.resolveInConcreteMap(op.first->segment, address);
           if (!found) {
@@ -3417,10 +3420,13 @@ void Executor::callExternalFunction(ExecutionState &state,
   ObjectPair result;
   auto segment = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
   auto offset = ConstantExpr::create(0, Expr::Int64);
+  uint64_t temp = 0;
   bool resolved;
   state.addressSpace.resolveOne(state, solver,
                                 KValue(segment, offset),
-                                result, resolved);
+                                result, resolved, temp);
+  if (temp)
+    offset = ConstantExpr::create(temp, Expr::Int64);
   if (!resolved)
     klee_error("Could not resolve memory object for errno");
 
@@ -3460,7 +3466,7 @@ void Executor::callExternalFunction(ExecutionState &state,
     return;
   }
 
-  if (!state.addressSpace.copyInConcretes(resolvedMOs)) {
+  if (!state.addressSpace.copyInConcretes(resolvedMOs, state, solver)) {
     terminateStateOnError(state, "external modified read-only object",
                           External);
     return;
@@ -3470,7 +3476,7 @@ void Executor::callExternalFunction(ExecutionState &state,
   // Update errno memory object with the errno value from the call
   int error = externalDispatcher->getLastErrno();
   state.addressSpace.copyInConcrete(result.first, result.second,
-                                    (uint64_t)&error);
+                                    (uint64_t)&error, state, solver);
 #endif
 
   Type *resultType = target->inst->getType();
@@ -3664,7 +3670,8 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   ObjectPair op;
   bool success;
   solver->setTimeout(coreSolverTimeout);
-  if (!state.addressSpace.resolveOne(state, solver, address, op, success)) {
+  uint64_t offsetVal = 0;
+  if (!state.addressSpace.resolveOne(state, solver, address, op, success, offsetVal)) {
     address = KValue(toConstant(state, address.getSegment(), "resolveOne failure"),
                      toConstant(state, address.getOffset(), "resolveOne failure"));
     success = state.addressSpace.resolveConstantAddress(address, op);
@@ -3680,10 +3687,17 @@ void Executor::executeMemoryOperation(ExecutionState &state,
       address = KValue(toConstant(state, address.getSegment(), "max-sym-array-size"),
                        toConstant(state, address.getOffset(), "max-sym-array-size"));
     }
+    ref<Expr> offset;
+    ref<Expr> segment;
+    if (offsetVal) {
+      segment = ConstantExpr::alloc(mo->segment, Expr::Int64);
+      offset = ConstantExpr::alloc(offsetVal, Expr::Int64);
+    } else {
+      segment = address.getSegment();
+      offset = address.getOffset();
+    }
 
-    ref<Expr> offset = address.getOffset();
-
-    ref<Expr> isEqualSegment = EqExpr::create(mo->getSegmentExpr(), address.getSegment());
+    ref<Expr> isEqualSegment = EqExpr::create(mo->getSegmentExpr(), segment);
 
     ref<Expr> isOffsetInBounds = mo->getBoundsCheckOffset(offset, bytes);
     isOffsetInBounds = optimizer.optimizeExpr(isOffsetInBounds, true);

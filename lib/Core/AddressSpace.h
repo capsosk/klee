@@ -82,12 +82,15 @@ namespace klee {
     /// \param address The address to search for.
     /// \param[out] result An ObjectPair this address can resolve to 
     ///               (when returning true).
+    /// \param[out] offset if resolveOne found OP by address,
+    ///               sends back offset value at which it was found.
     /// \return true iff an object was found at \a address.
     bool resolveOne(ExecutionState &state, 
                     TimingSolver *solver,
                     const KValue &pointer,
                     ObjectPair &result,
-                    bool &success) const;
+                    bool &success,
+                    uint64_t &offset) const;
 
     /// Resolve pointer `p` to a list of `ObjectPairs` it can point
     /// to. If `maxResolutions` is non-zero then no more than that many
@@ -144,7 +147,7 @@ namespace klee {
     ///
     /// \retval true The copy succeeded. 
     /// \retval false The copy failed because a read-only object was modified.
-    bool copyInConcretes(const SegmentAddressMap &resolved);
+    bool copyInConcretes(const SegmentAddressMap &resolved, ExecutionState &state, TimingSolver *solver);
 
     /// Updates the memory object with the raw memory from the address
     ///
@@ -153,7 +156,7 @@ namespace klee {
     /// @param src_address the address to copy from
     /// @return
     bool copyInConcrete(const MemoryObject *mo, const ObjectState *os,
-                        const uint64_t &resolvedAddress);
+                        const uint64_t &resolvedAddress, ExecutionState &state, TimingSolver *solver);
 
     /// Checks if address can be found within bounds of concrete addresses in AddressSpace::concreteAddressMap
     /// \param state

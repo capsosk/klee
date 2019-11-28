@@ -96,13 +96,13 @@ bool AddressSpace::resolveOne(ExecutionState &state,
                               TimingSolver *solver,
                               const KValue &pointer,
                               ObjectPair &result,
-                              bool &success) const {
+                              bool &success,
+                              uint64_t &offset) const {
   if (pointer.isConstant()) {
     success = resolveConstantAddress(pointer, result);
     if (!success) {
       ResolutionList resList;
-      uint64_t tmp;
-      resolveAddressWithOffset(state, solver, pointer.getOffset(), resList, tmp);
+      resolveAddressWithOffset(state, solver, pointer.getOffset(), resList, offset);
       if (resList.size() == 1) {
         success = true;
         result = resList.at(0);
@@ -298,7 +298,7 @@ void AddressSpace::copyOutConcretes(const SegmentAddressMap &resolved, bool igno
   }
 }
 
-bool AddressSpace::copyInConcretes(const SegmentAddressMap &resolved) {
+bool AddressSpace::copyInConcretes(const SegmentAddressMap &resolved, ExecutionState &state, TimingSolver *solver) {
   for (MemoryMap::iterator it = objects.begin(), ie = objects.end(); 
        it != ie; ++it) {
     const MemoryObject *mo = it->first;
@@ -309,7 +309,7 @@ bool AddressSpace::copyInConcretes(const SegmentAddressMap &resolved) {
     if (!mo->isUserSpecified) {
       const ObjectState *os = it->second;
 
-      if (!copyInConcrete(mo, os, pair->second))
+      if (!copyInConcrete(mo, os, pair->second, state, solver))
         return false;
     }
   }
@@ -318,9 +318,8 @@ bool AddressSpace::copyInConcretes(const SegmentAddressMap &resolved) {
 }
 
 bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
-                                  const uint64_t &resolvedAddress) {
+                                  const uint64_t &resolvedAddress, ExecutionState &state, TimingSolver *solver) {
   auto address = reinterpret_cast<uint8_t*>(resolvedAddress);
-  // TODO segment
   auto &concreteStoreR = os->offsetPlane->concreteStore;
   if (memcmp(address, concreteStoreR.data(), concreteStoreR.size())!=0) {
     if (os->readOnly) {

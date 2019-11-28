@@ -679,9 +679,10 @@ void SpecialFunctionHandler::handleGetErrno(ExecutionState &state,
   auto segmentExpr = ConstantExpr::create(0, Expr::Int64);
   auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Expr::Int64);
   bool resolved;
+  uint64_t temp;
   state.addressSpace.resolveOne(state, executor.solver,
                                 KValue(segmentExpr, addrExpr),
-                                result, resolved);
+                                result, resolved, temp);
   if (!resolved)
     executor.terminateStateOnError(state, "Could not resolve address for errno",
                                    Executor::User);

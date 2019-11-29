@@ -81,7 +81,6 @@
 #include <string>
 #include <sys/mman.h>
 #include <vector>
-#include <optional>
 
 using namespace llvm;
 using namespace klee;
@@ -3684,7 +3683,6 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   ObjectPair op;
   bool success;
   solver->setTimeout(coreSolverTimeout);
-  //TODO:: optional instead of UINT64_MAX
   llvm::Optional<uint64_t> offsetVal;
   if (!state.addressSpace.resolveOne(state, solver, address, op, success, offsetVal)) {
     address = KValue(toConstant(state, address.getSegment(), "resolveOne failure"),

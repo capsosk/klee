@@ -627,9 +627,7 @@ MemoryObject * Executor::addExternalObject(ExecutionState &state,
                                            void *addr, unsigned size,
                                            bool isReadOnly, uint64_t specialSegment) {
   auto mo = memory->allocateFixed(size, nullptr, specialSegment);
-
-  state.addressSpace.concreteAddressMap.insert({(uint64_t)addr, mo->segment});
-
+  state.addressSpace.concreteAddressMap.insert({reinterpret_cast<uint64_t>(addr), mo->segment});
   ObjectState *os = bindObjectInState(state, mo, false);
   for(unsigned i = 0; i < size; i++)
     os->write8(i, (uint8_t)mo->segment, ((uint8_t*)addr)[i]);
@@ -804,7 +802,7 @@ void Executor::initializeGlobals(ExecutionState &state) {
   // remember constant objects to initialise their counter part for external
   // calls
   std::vector<ObjectState *> constantObjects;
-  ConcreteAddressMap initializedMOs;
+  SegmentAddressMap initializedMOs;
 
   for (Module::const_global_iterator i = m->global_begin(),
          e = m->global_end();
@@ -816,7 +814,10 @@ void Executor::initializeGlobals(ExecutionState &state) {
       if (!address)
         klee_error("Couldn't allocate memory for external function");
 
-      initializedMOs.emplace(mo->segment, (uint64_t)address);
+      initializedMOs.insert({mo->segment, reinterpret_cast<uint64_t>(address)});
+      state.addressSpace.concreteAddressMap.insert({reinterpret_cast<uint64_t>(address), mo->getSegment()});
+      state.addressSpace.segmentMap.replace(std::make_pair(mo->getSegment(), mo));
+
       const ObjectState *os = state.addressSpace.findObject(mo);
       assert(os);
       ObjectState *wos = state.addressSpace.getWriteable(mo, os);
@@ -1397,7 +1398,8 @@ void Executor::executeLifetimeIntrinsic(ExecutionState &state,
                                         bool isEnd) {
   ObjectPair op;
   bool success;
-  state.addressSpace.resolveOne(state, solver, address, op, success);
+  llvm::Optional<uint64_t> temp;
+  state.addressSpace.resolveOne(state, solver, address, op, success, temp);
   if (!success) {
     // the object is dead, create a new one
     // XXX: we should distringuish between resolve error and dead object...
@@ -3308,12 +3310,11 @@ void Executor::callExternalFunction(ExecutionState &state,
   uint64_t *args = (uint64_t*) alloca(2*sizeof(*args) * (arguments.size() + 1));
   memset(args, 0, 2 * sizeof(*args) * (arguments.size() + 1));
   unsigned wordIndex = 2;
-  typedef std::map</*segment*/const uint64_t, /*address*/ const uint64_t> SegmentAddressMap;
   SegmentAddressMap resolvedMOs;
 
   for (std::vector<Cell>::const_iterator ai = arguments.begin(),
        ae = arguments.end(); ai!=ae; ++ai) {
-    void* address = nullptr;
+    uint64_t address = 0;
     if (ExternalCalls == ExternalCallPolicy::All) { // don't bother checking uniqueness
       auto value = optimizer.optimizeExpr(ai->getValue(), true);
       ref<ConstantExpr> ce;
@@ -3325,14 +3326,18 @@ void Executor::callExternalFunction(ExecutionState &state,
 
       // Checking to see if the argument is a pointer to something
       if (ce->getWidth() == Context::get().getPointerWidth()) {
+        Optional<uint64_t> temp;
         state.addressSpace.resolveOne(state, solver, *ai,
-                                      op, success);
+                                      op, success, temp);
         if (success) {
-          address = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
-          if (!address)
-            klee_error("Couldn't allocate memory for external function");
-
-          resolvedMOs.emplace(op.first->segment, (uint64_t)address);
+          auto found = state.addressSpace.resolveInConcreteMap(op.first->segment, address);
+          if (!found) {
+            void* addr = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
+            if (!addr)
+              klee_error("Couldn't allocate memory for external function");
+            address = reinterpret_cast<uint64_t>(addr);
+          }
+          resolvedMOs.insert({op.first->segment, address});
 
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
@@ -3360,12 +3365,18 @@ void Executor::callExternalFunction(ExecutionState &state,
           ai->getOffset()->getWidth() == Context::get().getPointerWidth()) {
 
         bool success;
-        state.addressSpace.resolveOne(state, solver, *ai, op, success);
+        Optional<uint64_t> temp;
+        state.addressSpace.resolveOne(state, solver, *ai, op, success, temp);
         if (success) {
-          address = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
-          if (!address)
-            klee_error("Couldn't allocate memory for external function");
-          resolvedMOs.emplace(op.first->segment, (uint64_t)address);
+          auto found = state.addressSpace.resolveInConcreteMap(op.first->segment, address);
+          if (!found) {
+            void* addr = memory->allocateMemory(op.first->allocatedSize, getAllocationAlignment(op.first->allocSite));
+            if (!addr)
+              klee_error("Couldn't allocate memory for external function");
+            address = reinterpret_cast<uint64_t>(addr);
+          }
+
+          resolvedMOs.insert({op.first->segment, address});
 
           if (op.second->getSizeBound() == 0 ||
               (op.second->getSizeBound() > op.first->allocatedSize)) {
@@ -3407,13 +3418,15 @@ void Executor::callExternalFunction(ExecutionState &state,
   int *errno_addr = getErrnoLocation(state);
 
   ObjectPair result;
-  // TODO segment
   auto segment = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
   auto offset = ConstantExpr::create(0, Expr::Int64);
+  Optional<uint64_t> temp;
   bool resolved;
   state.addressSpace.resolveOne(state, solver,
                                 KValue(segment, offset),
-                                result, resolved);
+                                result, resolved, temp);
+  if (temp)
+    offset = ConstantExpr::create(temp.getValue(), Expr::Int64);
   if (!resolved)
     klee_error("Could not resolve memory object for errno");
 
@@ -3429,11 +3442,10 @@ void Executor::callExternalFunction(ExecutionState &state,
     llvm::raw_string_ostream os(TmpStr);
     os << "calling external: " << function->getName().str() << "(";
     for (unsigned i=0; i<arguments.size(); i++) {
-      // TODO segment
       if (arguments[i].value->isZero()) {
         os << "segment: " << arguments[i].pointerSegment;
       } else {
-        os << "address: " << arguments[i].value;
+        os << "value/address: " << arguments[i].value;
       }
       if (i != arguments.size()-1)
         os << ", ";
@@ -3453,7 +3465,7 @@ void Executor::callExternalFunction(ExecutionState &state,
     return;
   }
 
-  if (!state.addressSpace.copyInConcretes(resolvedMOs)) {
+  if (!state.addressSpace.copyInConcretes(resolvedMOs, state, solver)) {
     terminateStateOnError(state, "external modified read-only object",
                           External);
     return;
@@ -3463,15 +3475,29 @@ void Executor::callExternalFunction(ExecutionState &state,
   // Update errno memory object with the errno value from the call
   int error = externalDispatcher->getLastErrno();
   state.addressSpace.copyInConcrete(result.first, result.second,
-                                    (uint64_t)&error);
+                                    (uint64_t)&error, state, solver);
 #endif
 
   Type *resultType = target->inst->getType();
   if (resultType != Type::getVoidTy(function->getContext())) {
-    ref<Expr> e = ConstantExpr::fromMemory((void*) args, 
+    KValue value;
+    ref<Expr> returnVal = ConstantExpr::fromMemory((void*) args,
                                            getWidthForLLVMType(resultType));
-    // TODO segment
-    bindLocal(target, state, KValue(e));
+    if (returnVal->getWidth() == Context::get().getPointerWidth()) {
+      ResolutionList rl;
+      Optional<uint64_t> calculatedOffset;
+      state.addressSpace.resolveAddressWithOffset(state, solver, returnVal, rl, calculatedOffset);
+
+      if (rl.size() == 1) {
+        value = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset.getValue(), Expr::Int64));
+      } else {
+        value = returnVal;
+      }
+
+    } else {
+      value = returnVal;
+    }
+    bindLocal(target, state, value);
   }
 }
 
@@ -3657,7 +3683,8 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   ObjectPair op;
   bool success;
   solver->setTimeout(coreSolverTimeout);
-  if (!state.addressSpace.resolveOne(state, solver, address, op, success)) {
+  llvm::Optional<uint64_t> offsetVal;
+  if (!state.addressSpace.resolveOne(state, solver, address, op, success, offsetVal)) {
     address = KValue(toConstant(state, address.getSegment(), "resolveOne failure"),
                      toConstant(state, address.getOffset(), "resolveOne failure"));
     success = state.addressSpace.resolveConstantAddress(address, op);
@@ -3673,10 +3700,17 @@ void Executor::executeMemoryOperation(ExecutionState &state,
       address = KValue(toConstant(state, address.getSegment(), "max-sym-array-size"),
                        toConstant(state, address.getOffset(), "max-sym-array-size"));
     }
+    ref<Expr> offset;
+    ref<Expr> segment;
+    if (offsetVal) {
+      segment = ConstantExpr::alloc(mo->segment, Expr::Int64);
+      offset = ConstantExpr::alloc(offsetVal.getValue(), Expr::Int64);
+    } else {
+      segment = address.getSegment();
+      offset = address.getOffset();
+    }
 
-    ref<Expr> offset = address.getOffset();
-
-    ref<Expr> isEqualSegment = EqExpr::create(mo->getSegmentExpr(), address.getSegment());
+    ref<Expr> isEqualSegment = EqExpr::create(mo->getSegmentExpr(), segment);
 
     ref<Expr> isOffsetInBounds = mo->getBoundsCheckOffset(offset, bytes);
     isOffsetInBounds = optimizer.optimizeExpr(isOffsetInBounds, true);
@@ -3693,7 +3727,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
       return;
     }
 
-    if ((inBoundsSegment && inBoundsOffset) || op.first->isUserSpecified) {
+    if (inBoundsSegment && inBoundsOffset) {
       const ObjectState *os = op.second;
       if (isWrite) {
         if (os->readOnly) {
@@ -3705,7 +3739,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
         }          
       } else {
         KValue result = os->read(offset, type);
-        
+
         if (interpreterOpts.MakeConcreteSymbolic) {
           result = KValue(replaceReadWithSymbolic(state, result.getSegment()),
                           replaceReadWithSymbolic(state, result.getOffset()));

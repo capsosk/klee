@@ -679,9 +679,10 @@ void SpecialFunctionHandler::handleGetErrno(ExecutionState &state,
   auto segmentExpr = ConstantExpr::create(0, Expr::Int64);
   auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Expr::Int64);
   bool resolved;
+  Optional<uint64_t> temp;
   state.addressSpace.resolveOne(state, executor.solver,
                                 KValue(segmentExpr, addrExpr),
-                                result, resolved);
+                                result, resolved, temp);
   if (!resolved)
     executor.terminateStateOnError(state, "Could not resolve address for errno",
                                    Executor::User);
@@ -828,13 +829,15 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
   uint64_t address = addressExpr->getZExtValue();
 
   ResolutionList rl;
-  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl);
+  Optional<uint64_t> temp;
+  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl, temp);
   if (!rl.empty())
     klee_error("Trying to allocate an overlapping object");
 
   MemoryObject *mo = executor.memory->allocateFixed(size, state.prevPC->inst);
   executor.bindObjectInState(state, mo, false);
   state.addressSpace.concreteAddressMap.insert({address, mo->segment});
+  state.addressSpace.segmentMap.insert(std::make_pair(mo->segment, mo));
   mo->isUserSpecified = true; // XXX hack;
 }
 

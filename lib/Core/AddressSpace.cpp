@@ -70,17 +70,6 @@ bool AddressSpace::resolveInConcreteMap(const uint64_t& segment, uint64_t &addre
 bool AddressSpace::resolveConstantAddress(const KValue &pointer,
                                           ObjectPair &result) const {
   uint64_t segment = cast<ConstantExpr>(pointer.getSegment())->getZExtValue();
-  uint64_t address = 0;
-
-  if (isa<ConstantExpr>(pointer.getValue())) {
-    address = cast<ConstantExpr>(pointer.getValue())->getZExtValue();
-  }
-
-  if (segment == 0 && address != 0) {
-    const auto it = concreteAddressMap.find(address);
-    if (it != concreteAddressMap.end())
-      segment = it->second;
-  }
 
   if (segment != 0) {
     if (const SegmentMap::value_type *res = segmentMap.lookup(segment)) {
@@ -97,7 +86,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
                               const KValue &pointer,
                               ObjectPair &result,
                               bool &success,
-                              uint64_t &offset) const {
+                              llvm::Optional<uint64_t>& offset) const {
   if (pointer.isConstant()) {
     success = resolveConstantAddress(pointer, result);
     if (!success) {
@@ -226,15 +215,15 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
       rl.push_back(res);
     return false;
   }
-  uint64_t tmp;
-  resolveAddressWithOffset(state, solver, pointer.getOffset(), rl, tmp);
+  llvm::Optional<uint64_t> temp;
+  resolveAddressWithOffset(state, solver, pointer.getOffset(), rl, temp);
 
   return false;
 }
 void AddressSpace::resolveAddressWithOffset(const ExecutionState &state,
                                             TimingSolver *solver,
                                             const ref<Expr> &address,
-                                            ResolutionList &rl, uint64_t& offset) const {
+                                            ResolutionList &rl, llvm::Optional<uint64_t>& offset) const {
   ConstantExpr* value = dyn_cast<ConstantExpr>(address);
   if (!value)
     return;
@@ -326,11 +315,28 @@ bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
       return false;
     } else {
       ObjectState *wos = getWriteable(mo, os);
-      auto &concreteStoreW = wos->offsetPlane->concreteStore;
-      memcpy(concreteStoreW.data(), address, concreteStoreW.size());
+      writeToWOS(state, solver, address, wos);
     }
   }
   return true;
+}
+void AddressSpace::writeToWOS(ExecutionState &state, TimingSolver *solver,
+                              const uint8_t *address, ObjectState *wos) const {
+  auto &concreteStoreW = wos->offsetPlane->concreteStore;
+  memcpy(concreteStoreW.data(), address, concreteStoreW.size());
+
+  if (concreteStoreW.size() == 8) {
+    KValue written = wos->read(0, Expr::Int64);
+
+    ResolutionList rl;
+    llvm::Optional<uint64_t> offset;
+    resolveAddressWithOffset(state, solver, written.getValue(), rl, offset);
+    if (!rl.empty()) {
+      auto result = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(offset.getValue(), Expr::Int64));
+      wos->write(0, result);
+      return;
+    }
+  }
 }
 
 /***/

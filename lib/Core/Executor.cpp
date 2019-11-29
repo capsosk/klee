@@ -81,6 +81,7 @@
 #include <string>
 #include <sys/mman.h>
 #include <vector>
+#include <optional>
 
 using namespace llvm;
 using namespace klee;
@@ -1398,7 +1399,7 @@ void Executor::executeLifetimeIntrinsic(ExecutionState &state,
                                         bool isEnd) {
   ObjectPair op;
   bool success;
-  uint64_t temp;
+  llvm::Optional<uint64_t> temp;
   state.addressSpace.resolveOne(state, solver, address, op, success, temp);
   if (!success) {
     // the object is dead, create a new one
@@ -3326,7 +3327,7 @@ void Executor::callExternalFunction(ExecutionState &state,
 
       // Checking to see if the argument is a pointer to something
       if (ce->getWidth() == Context::get().getPointerWidth()) {
-        uint64_t temp;
+        Optional<uint64_t> temp;
         state.addressSpace.resolveOne(state, solver, *ai,
                                       op, success, temp);
         if (success) {
@@ -3365,7 +3366,7 @@ void Executor::callExternalFunction(ExecutionState &state,
           ai->getOffset()->getWidth() == Context::get().getPointerWidth()) {
 
         bool success;
-        uint64_t temp;
+        Optional<uint64_t> temp;
         state.addressSpace.resolveOne(state, solver, *ai, op, success, temp);
         if (success) {
           auto found = state.addressSpace.resolveInConcreteMap(op.first->segment, address);
@@ -3420,13 +3421,13 @@ void Executor::callExternalFunction(ExecutionState &state,
   ObjectPair result;
   auto segment = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
   auto offset = ConstantExpr::create(0, Expr::Int64);
-  uint64_t temp = 0;
+  Optional<uint64_t> temp;
   bool resolved;
   state.addressSpace.resolveOne(state, solver,
                                 KValue(segment, offset),
                                 result, resolved, temp);
   if (temp)
-    offset = ConstantExpr::create(temp, Expr::Int64);
+    offset = ConstantExpr::create(temp.getValue(), Expr::Int64);
   if (!resolved)
     klee_error("Could not resolve memory object for errno");
 
@@ -3442,11 +3443,10 @@ void Executor::callExternalFunction(ExecutionState &state,
     llvm::raw_string_ostream os(TmpStr);
     os << "calling external: " << function->getName().str() << "(";
     for (unsigned i=0; i<arguments.size(); i++) {
-      // TODO segment
       if (arguments[i].value->isZero()) {
         os << "segment: " << arguments[i].pointerSegment;
       } else {
-        os << "address: " << arguments[i].value;
+        os << "value/address: " << arguments[i].value;
       }
       if (i != arguments.size()-1)
         os << ", ";
@@ -3481,10 +3481,24 @@ void Executor::callExternalFunction(ExecutionState &state,
 
   Type *resultType = target->inst->getType();
   if (resultType != Type::getVoidTy(function->getContext())) {
-    ref<Expr> e = ConstantExpr::fromMemory((void*) args, 
+    KValue value;
+    ref<Expr> returnVal = ConstantExpr::fromMemory((void*) args,
                                            getWidthForLLVMType(resultType));
-    // TODO segment
-    bindLocal(target, state, KValue(e));
+    if (returnVal->getWidth() == Context::get().getPointerWidth()) {
+      ResolutionList rl;
+      Optional<uint64_t> calculatedOffset;
+      state.addressSpace.resolveAddressWithOffset(state, solver, returnVal, rl, calculatedOffset);
+
+      if (rl.size() == 1) {
+        value = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset.getValue(), Expr::Int64));
+      } else {
+        value = returnVal;
+      }
+
+    } else {
+      value = returnVal;
+    }
+    bindLocal(target, state, value);
   }
 }
 
@@ -3670,7 +3684,8 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   ObjectPair op;
   bool success;
   solver->setTimeout(coreSolverTimeout);
-  uint64_t offsetVal = 0;
+  //TODO:: optional instead of UINT64_MAX
+  llvm::Optional<uint64_t> offsetVal;
   if (!state.addressSpace.resolveOne(state, solver, address, op, success, offsetVal)) {
     address = KValue(toConstant(state, address.getSegment(), "resolveOne failure"),
                      toConstant(state, address.getOffset(), "resolveOne failure"));
@@ -3691,7 +3706,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
     ref<Expr> segment;
     if (offsetVal) {
       segment = ConstantExpr::alloc(mo->segment, Expr::Int64);
-      offset = ConstantExpr::alloc(offsetVal, Expr::Int64);
+      offset = ConstantExpr::alloc(offsetVal.getValue(), Expr::Int64);
     } else {
       segment = address.getSegment();
       offset = address.getOffset();
@@ -3726,15 +3741,6 @@ void Executor::executeMemoryOperation(ExecutionState &state,
         }          
       } else {
         KValue result = os->read(offset, type);
-
-        if (result.value.get()->getWidth() == Context::get().getPointerWidth() && isa<ConstantExpr>(result.getSegment()) && cast<ConstantExpr>(result.getSegment())->getZExtValue() == 0) {
-          ResolutionList rl;
-          uint64_t calculatedOffset = 0;
-          state.addressSpace.resolveAddressWithOffset(state, solver, result.getValue(), rl, calculatedOffset);
-          if (!rl.empty()) {
-            result = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset, Expr::Int64));
-          }
-        }
 
         if (interpreterOpts.MakeConcreteSymbolic) {
           result = KValue(replaceReadWithSymbolic(state, result.getSegment()),

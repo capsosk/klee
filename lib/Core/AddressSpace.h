@@ -90,7 +90,7 @@ namespace klee {
                     const KValue &pointer,
                     ObjectPair &result,
                     bool &success,
-                    uint64_t &offset) const;
+                    llvm::Optional<uint64_t> &offset) const;
 
     /// Resolve pointer `p` to a list of `ObjectPairs` it can point
     /// to. If `maxResolutions` is non-zero then no more than that many
@@ -166,7 +166,8 @@ namespace klee {
     void resolveAddressWithOffset(const ExecutionState &state,
                                   TimingSolver *solver,
                                   const ref<Expr> &address,
-                                  ResolutionList &rl, uint64_t& offset) const;
+                                  ResolutionList &rl, llvm::Optional<uint64_t>& offset) const;
+    void writeToWOS(ExecutionState &state, TimingSolver *solver, const uint8_t *address, ObjectState *wos) const;
   };
 } // End klee namespace
 

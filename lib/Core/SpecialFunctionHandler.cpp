@@ -679,7 +679,7 @@ void SpecialFunctionHandler::handleGetErrno(ExecutionState &state,
   auto segmentExpr = ConstantExpr::create(0, Expr::Int64);
   auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Expr::Int64);
   bool resolved;
-  uint64_t temp;
+  Optional<uint64_t> temp;
   state.addressSpace.resolveOne(state, executor.solver,
                                 KValue(segmentExpr, addrExpr),
                                 result, resolved, temp);
@@ -829,8 +829,8 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
   uint64_t address = addressExpr->getZExtValue();
 
   ResolutionList rl;
-  uint64_t tmp;
-  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl, tmp);
+  Optional<uint64_t> temp;
+  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl, temp);
   if (!rl.empty())
     klee_error("Trying to allocate an overlapping object");
 

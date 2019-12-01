@@ -67,8 +67,8 @@ bool AddressSpace::resolveInConcreteMap(const uint64_t& segment, uint64_t &addre
   return false;
 }
 
-bool AddressSpace::resolveConstantAddress(const KValue &pointer,
-                                          ObjectPair &result) const {
+bool AddressSpace::resolveOneConstantSegment(const KValue &pointer,
+                                             ObjectPair &result) const {
   uint64_t segment = cast<ConstantExpr>(pointer.getSegment())->getZExtValue();
 
   if (segment != 0) {
@@ -88,7 +88,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
                               bool &success,
                               llvm::Optional<uint64_t>& offset) const {
   if (pointer.isConstant()) {
-    success = resolveConstantAddress(pointer, result);
+    success = resolveOneConstantSegment(pointer, result);
     if (!success) {
       ResolutionList resList;
       resolveAddressWithOffset(state, solver, pointer.getOffset(), resList, offset);
@@ -107,7 +107,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
     }
 
     if (!segment->isZero()) {
-      return resolveConstantAddress(KValue(segment, pointer.getOffset()), result);
+      return resolveOneConstantSegment(KValue(segment, pointer.getOffset()), result);
     }
 
     // didn't work, now we have to search
@@ -211,7 +211,7 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
                                           time::Span timeout) const {
   if (!cast<ConstantExpr>(pointer.getSegment())->isZero()) {
     ObjectPair res;
-    if (resolveConstantAddress(pointer, res))
+    if (resolveOneConstantSegment(pointer, res))
       rl.push_back(res);
     return false;
   }

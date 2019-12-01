@@ -73,6 +73,9 @@ public:
   /// should sensibly be only at creation time).
   mutable std::vector< ref<Expr> > cexPreferences;
 
+  /// Symbolic address for poiner comparison
+  llvm::Optional<const Array*> symbolicAddress;
+
   // DO NOT IMPLEMENT
   MemoryObject(const MemoryObject &b);
   MemoryObject &operator=(const MemoryObject &b);
@@ -131,6 +134,10 @@ public:
   /// Get an identifying string for this allocation.
   void getAllocInfo(std::string &result) const;
 
+  /// If not initialized, creates symbolic array representing it's address
+  /// and returns it
+  ref<Expr> getSymbolicArray(klee::ArrayCache &array);
+
   void setName(std::string name) const {
     this->name = name;
   }
@@ -149,7 +156,7 @@ public:
   KValue getPointer(uint64_t offset) const {
     return KValue(getSegmentExpr(), ConstantExpr::create(offset, Context::get().getPointerWidth()));
   }
-  std::string getAddressString() const {
+  std::string getSegmentString() const {
     return std::string(&"Segment: " [ segment ]);
   }
   std::string getSizeString() const {

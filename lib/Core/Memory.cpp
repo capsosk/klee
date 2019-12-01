@@ -92,6 +92,13 @@ void MemoryObject::getAllocInfo(std::string &result) const {
   info.flush();
 }
 
+ref<Expr> MemoryObject::getSymbolicArray(klee::ArrayCache &array) {
+  if (!symbolicAddress) {
+    symbolicAddress = array.CreateArray(std::string("Array for MO :") + std::to_string(segment), Expr::Int64);
+  }
+  return Expr::createTempRead(symbolicAddress.getValue(), Expr::Int64);
+}
+
 /***/
 
 ObjectStatePlane::ObjectStatePlane(const ObjectState *parent)

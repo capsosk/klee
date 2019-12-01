@@ -71,8 +71,8 @@ namespace klee {
 
     bool resolveInConcreteMap(const uint64_t &segment, uint64_t &address) const;
 
-    bool resolveConstantAddress(const KValue &pointer,
-                                ObjectPair &result) const;
+    bool resolveOneConstantSegment(const KValue &pointer,
+                                   ObjectPair &result) const;
 
     /// Resolve address to an ObjectPair in result.
     ///

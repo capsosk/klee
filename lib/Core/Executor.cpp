@@ -2266,18 +2266,29 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
 
     const Cell &leftOriginal = eval(ki, 0, state);
     const Cell &rightOriginal = eval(ki, 1, state);
-    const auto LCE = dyn_cast<ConstantExpr>(leftOriginal.getSegment().get());
-    const auto RCE = dyn_cast<ConstantExpr>(rightOriginal.getSegment().get());
+
+    const auto leftSegment = dyn_cast<ConstantExpr>(leftOriginal.getSegment().get());
+    const auto rightSegment = dyn_cast<ConstantExpr>(rightOriginal.getSegment().get());
+    const auto leftValue = dyn_cast<ConstantExpr>(leftOriginal.getValue().get());
+    const auto rightValue = dyn_cast<ConstantExpr>(rightOriginal.getValue().get());
 
     ref<Expr> leftArray;
     ref<Expr> rightArray;
+
+    bool useOriginalValues = false;
+    if (leftValue && rightValue && (!leftValue->isZero() || !rightValue->isZero())) {
+      klee_warning("Offset is either is not zero, not using symbolic pointer values");
+      useOriginalValues = true;
+    }
+
     bool success = false;
     const auto &pointerWidth = Context::get().getPointerWidth();
 
-    if (LCE && RCE && LCE->getWidth() == pointerWidth && RCE->getWidth() == pointerWidth &&
-        LCE->getZExtValue() && RCE->getZExtValue() && RCE->getZExtValue() != LCE->getZExtValue()) {
+    if (!useOriginalValues && leftSegment && rightSegment &&
+        leftSegment->getWidth() == pointerWidth && rightSegment->getWidth() == pointerWidth &&
+        !leftSegment->isZero() && !rightSegment->isZero() &&
+        rightSegment->getZExtValue() != leftSegment->getZExtValue()) {
 
-      //klee_warning("most likely comparing pointers, making values symbolic");
       ObjectPair op;
       bool successLeft = false;
       bool successRight = false;
@@ -2293,23 +2304,14 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
         success = true;
       }
     }
-
-
     KValue left;
     KValue right;
-
-    const auto LV = dyn_cast<ConstantExpr>(leftOriginal.getValue().get());
-    const auto RV = dyn_cast<ConstantExpr>(rightOriginal.getValue().get());
-
-    if (success && LV && RV && (LV->getZExtValue()|| RV->getZExtValue())) {
-      //klee_warning("Offset is not zero, not using symbolic pointer values!");
-      success = false;
-    }
 
     if (!success) {
       left = static_cast<KValue>(leftOriginal);
       right = static_cast<KValue>(rightOriginal);
     } else {
+      klee_warning("Comparing pointers, using symbolic values instead of segment for comparison");
       left = KValue(leftOriginal.getSegment(), leftArray);
       right = KValue(rightOriginal.getSegment(), rightArray);
     }

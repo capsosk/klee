@@ -2275,10 +2275,11 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     ref<Expr> leftArray;
     ref<Expr> rightArray;
 
-    bool useOriginalValues = false;
-    if (leftValue && rightValue && (!leftValue->isZero() || !rightValue->isZero())) {
-      klee_warning("Offset is either is not zero, not using symbolic pointer values");
-      useOriginalValues = true;
+    /// Only use symbolics with Constant values(offsets)
+    bool useOriginalValues = true;
+
+    if (leftValue && rightValue) {
+      useOriginalValues = false;
     }
 
     bool success = false;
@@ -2296,11 +2297,11 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
       successLeft = state.addressSpace.resolveOneConstantSegment(leftOriginal, op);
 
       if (successLeft) {
-        leftArray = const_cast<MemoryObject*>(op.first)->getSymbolicArray(arrayCache);
+        leftArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(arrayCache);
         successRight = state.addressSpace.resolveOneConstantSegment(rightOriginal, op);
       }
       if (successRight) {
-        rightArray = const_cast<MemoryObject*>(op.first)->getSymbolicArray(arrayCache);
+        rightArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(arrayCache);
         success = true;
       }
     }

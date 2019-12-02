@@ -135,8 +135,8 @@ public:
   void getAllocInfo(std::string &result) const;
 
   /// If not initialized, creates symbolic array representing it's address
-  /// and returns it
-  ref<Expr> getSymbolicArray(klee::ArrayCache &array);
+  /// and returns ref<Expr> for it
+  ref<Expr> getSymbolicAddress(klee::ArrayCache &array);
 
   void setName(std::string name) const {
     this->name = name;

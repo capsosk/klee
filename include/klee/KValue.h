@@ -19,7 +19,7 @@
 enum SpecialSegment {
     VALUES_SEGMENT = 0,         // an ordinary numbers
     FUNCTIONS_SEGMENT = 2,      // functions
-    ERRNO_SEGMENT = 10,
+    ERRNO_SEGMENT = 10,         // errno MemoryObject
     FIRST_ORDINARY_SEGMENT = 11 // allocated memory (on stack, heap and globals)
 };
 
@@ -56,6 +56,8 @@ namespace klee {
     bool isConstant() const {
       return isa<ConstantExpr>(value) && isa<ConstantExpr>(pointerSegment);
     }
+
+    /// Checks if both segment and offset are ConstantExpr and if yes, if they contain zero value
     bool isZero() const {
       ConstantExpr *segment = dyn_cast<ConstantExpr>(pointerSegment);
       ConstantExpr *offset = dyn_cast<ConstantExpr>(value);
@@ -107,11 +109,15 @@ namespace klee {
 
 #define _op_seg_cmp_lexicographic(cmp) \
     KValue cmp(const KValue &other) const { \
-      return KValue(SelectExpr::create( \
+      if (isa<ConstantExpr>(value) && isa<ConstantExpr>(other.value)) { \
+        return KValue(SelectExpr::create( \
               EqExpr::create(pointerSegment, other.pointerSegment), \
               cmp##Expr::create(value, other.value), \
               cmp##Expr::create(pointerSegment, other.pointerSegment))); \
-    }
+      } else { \
+        return KValue(cmp##Expr::create(value, other.value)); \
+      } \
+    } \
 
     _op_seg_cmp_lexicographic(Ugt);
     _op_seg_cmp_lexicographic(Uge);

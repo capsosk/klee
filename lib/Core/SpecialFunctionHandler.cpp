@@ -277,7 +277,7 @@ SpecialFunctionHandler::readStringAtAddress(ExecutionState &state,
   }
 
   KValue address(segmentExpr, offsetExpr);
-  if (!state.addressSpace.resolveConstantAddress(address, op)) {
+  if (!state.addressSpace.resolveOneConstantSegment(address, op)) {
     executor.terminateStateOnError(
         state, "Invalid string pointer passed to one of the klee_ functions",
         Executor::TerminateReason::User);
@@ -677,7 +677,7 @@ void SpecialFunctionHandler::handleGetErrno(ExecutionState &state,
   ObjectPair result;
   //TODO segment
   auto segmentExpr = ConstantExpr::create(0, Expr::Int64);
-  auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Expr::Int64);
+  auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Context::get().getPointerWidth());
   bool resolved;
   Optional<uint64_t> temp;
   state.addressSpace.resolveOne(state, executor.solver,
@@ -783,11 +783,11 @@ void SpecialFunctionHandler::handleCheckMemoryAccess(ExecutionState &state,
   } else {
     ObjectPair op;
 
-    if (!state.addressSpace.resolveConstantAddress(address, op)) {
+    if (!state.addressSpace.resolveOneConstantSegment(address, op)) {
       executor.terminateStateOnError(state,
                                      "check_memory_access: memory error",
 				     Executor::Ptr, NULL,
-                                     executor.getAddressInfo(state, address));
+                                     executor.getKValueInfo(state, address));
     } else {
       ref<Expr> chk = 
         op.first->getBoundsCheckPointer(address, cast<ConstantExpr>(size)->getZExtValue());
@@ -795,7 +795,7 @@ void SpecialFunctionHandler::handleCheckMemoryAccess(ExecutionState &state,
         executor.terminateStateOnError(state,
                                        "check_memory_access: memory error",
 				       Executor::Ptr, NULL,
-                                       executor.getAddressInfo(state, address));
+                                       executor.getKValueInfo(state, address));
       }
     }
   }

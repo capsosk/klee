@@ -2264,8 +2264,58 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     CmpInst *ci = cast<CmpInst>(i);
     ICmpInst *ii = cast<ICmpInst>(ci);
 
-    const Cell &left = eval(ki, 0, state);
-    const Cell &right = eval(ki, 1, state);
+    const Cell &leftOriginal = eval(ki, 0, state);
+    const Cell &rightOriginal = eval(ki, 1, state);
+
+    const auto leftSegment = dyn_cast<ConstantExpr>(leftOriginal.getSegment().get());
+    const auto rightSegment = dyn_cast<ConstantExpr>(rightOriginal.getSegment().get());
+    const auto leftValue = dyn_cast<ConstantExpr>(leftOriginal.getValue().get());
+    const auto rightValue = dyn_cast<ConstantExpr>(rightOriginal.getValue().get());
+
+    ref<Expr> leftArray;
+    ref<Expr> rightArray;
+
+    /// Only use symbolics with Constant values(offsets)
+    bool useOriginalValues = true;
+
+    if (leftValue && rightValue) {
+      useOriginalValues = false;
+    }
+
+    bool success = false;
+    const auto &pointerWidth = Context::get().getPointerWidth();
+
+    if (!useOriginalValues && leftSegment && rightSegment &&
+        leftSegment->getWidth() == pointerWidth && rightSegment->getWidth() == pointerWidth &&
+        !leftSegment->isZero() && !rightSegment->isZero() &&
+        rightSegment->getZExtValue() != leftSegment->getZExtValue()) {
+
+      ObjectPair op;
+      bool successLeft = false;
+      bool successRight = false;
+
+      successLeft = state.addressSpace.resolveOneConstantSegment(leftOriginal, op);
+
+      if (successLeft) {
+        leftArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(arrayCache);
+        successRight = state.addressSpace.resolveOneConstantSegment(rightOriginal, op);
+      }
+      if (successRight) {
+        rightArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(arrayCache);
+        success = true;
+      }
+    }
+    KValue left;
+    KValue right;
+
+    if (!success) {
+      left = static_cast<KValue>(leftOriginal);
+      right = static_cast<KValue>(rightOriginal);
+    } else {
+      klee_warning("Comparing pointers, using symbolic values instead of segment for comparison");
+      left = KValue(leftOriginal.getSegment(), leftArray);
+      right = KValue(rightOriginal.getSegment(), rightArray);
+    }
 
     switch(ii->getPredicate()) {
     case ICmpInst::ICMP_EQ:
@@ -3022,8 +3072,8 @@ void Executor::run(ExecutionState &initialState) {
   doDumpStates();
 }
 
-std::string Executor::getAddressInfo(ExecutionState &state,
-                                     const KValue &address) const{
+std::string Executor::getKValueInfo(ExecutionState &state,
+                                    const KValue &address) const{
   std::string Str;
   llvm::raw_string_ostream info(Str);
   info << "\taddress: " << address.getSegment() << ":" << address.getOffset() << "\n";
@@ -3045,7 +3095,7 @@ std::string Executor::getAddressInfo(ExecutionState &state,
   }
   
   ObjectPair op;
-  bool success = state.addressSpace.resolveConstantAddress(KValue(segmentValue, offsetValue), op);
+  bool success = state.addressSpace.resolveOneConstantSegment(KValue(segmentValue, offsetValue), op);
   info << "\tpointing to: ";
   if (!success) {
     info << "none\n";
@@ -3053,7 +3103,7 @@ std::string Executor::getAddressInfo(ExecutionState &state,
     const MemoryObject *mo = op.first;
     std::string alloc_info;
     mo->getAllocInfo(alloc_info);
-    info << "object at " << mo->getAddressString()
+    info << "object at " << mo->getSegmentString()
          << " of size " << mo->getSizeString() << "\n"
          << "\t\t" << alloc_info << "\n";
   }
@@ -3153,7 +3203,7 @@ void Executor::terminateStateOnExit(ExecutionState &state) {
         return;
       std::string info = "";
       for (const auto mo : leaks) {
-        info += getAddressInfo(state, mo->getPointer());
+        info += getKValueInfo(state, mo->getPointer());
       }
       terminateStateOnError(state, "memory error: memory leak detected", Leak,
                             nullptr, info);
@@ -3419,14 +3469,14 @@ void Executor::callExternalFunction(ExecutionState &state,
 
   ObjectPair result;
   auto segment = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
-  auto offset = ConstantExpr::create(0, Expr::Int64);
+  auto offset = ConstantExpr::create(0, Context::get().getPointerWidth());
   Optional<uint64_t> temp;
   bool resolved;
   state.addressSpace.resolveOne(state, solver,
                                 KValue(segment, offset),
                                 result, resolved, temp);
   if (temp)
-    offset = ConstantExpr::create(temp.getValue(), Expr::Int64);
+    offset = ConstantExpr::create(temp.getValue(), Context::get().getPointerWidth());
   if (!resolved)
     klee_error("Could not resolve memory object for errno");
 
@@ -3489,7 +3539,7 @@ void Executor::callExternalFunction(ExecutionState &state,
       state.addressSpace.resolveAddressWithOffset(state, solver, returnVal, rl, calculatedOffset);
 
       if (rl.size() == 1) {
-        value = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset.getValue(), Expr::Int64));
+        value = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset.getValue(), Context::get().getPointerWidth()));
       } else {
         value = returnVal;
       }
@@ -3603,10 +3653,10 @@ void Executor::executeFree(ExecutionState &state,
       const MemoryObject *mo = it->first.first;
       if (mo->isLocal) {
         terminateStateOnError(*it->second, "free of alloca", Free, NULL,
-                              getAddressInfo(*it->second, addressOptim));
+                              getKValueInfo(*it->second, addressOptim));
       } else if (mo->isGlobal) {
         terminateStateOnError(*it->second, "free of global", Free, NULL,
-                              getAddressInfo(*it->second, addressOptim));
+                              getKValueInfo(*it->second, addressOptim));
       } else {
         it->second->addressSpace.unbindObject(mo);
         if (target)
@@ -3643,7 +3693,7 @@ void Executor::resolveExact(ExecutionState &state,
 
   if (unbound) {
     terminateStateOnError(*unbound, "memory error: invalid pointer: " + name,
-                          Ptr, NULL, getAddressInfo(*unbound, optimAddress));
+                          Ptr, NULL, getKValueInfo(*unbound, optimAddress));
   }
 }
 
@@ -3687,7 +3737,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   if (!state.addressSpace.resolveOne(state, solver, address, op, success, offsetVal)) {
     address = KValue(toConstant(state, address.getSegment(), "resolveOne failure"),
                      toConstant(state, address.getOffset(), "resolveOne failure"));
-    success = state.addressSpace.resolveConstantAddress(address, op);
+    success = state.addressSpace.resolveOneConstantSegment(address, op);
   }
   solver->setTimeout(time::Span());
 
@@ -3704,7 +3754,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
     ref<Expr> segment;
     if (offsetVal) {
       segment = ConstantExpr::alloc(mo->segment, Expr::Int64);
-      offset = ConstantExpr::alloc(offsetVal.getValue(), Expr::Int64);
+      offset = ConstantExpr::alloc(offsetVal.getValue(), Context::get().getPointerWidth());
     } else {
       segment = address.getSegment();
       offset = address.getOffset();
@@ -3802,7 +3852,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
       terminateStateEarly(*unbound, "Query timed out (resolve).");
     } else {
       terminateStateOnError(*unbound, "memory error: out of bound pointer", Ptr,
-                            NULL, getAddressInfo(*unbound, optimAddress));
+                            NULL, getKValueInfo(*unbound, optimAddress));
     }
   }
 }

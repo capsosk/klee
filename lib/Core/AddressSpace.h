@@ -28,7 +28,7 @@ namespace klee {
   typedef std::pair<const MemoryObject*, const ObjectState*> ObjectPair;
   typedef std::vector<ObjectPair> ResolutionList;  
 
-  /// Function object ordering MemoryObject's by address.
+  /// Function object ordering MemoryObject's by id.
   struct MemoryObjectLT {
     bool operator()(const MemoryObject *a, const MemoryObject *b) const;
   };
@@ -69,8 +69,16 @@ namespace klee {
       segmentMap(b.segmentMap) { }
     ~AddressSpace() {}
 
+    /// Looks up constant segment in concreteAddressMap.
+    /// \param segment segment to search for
+    /// \param[out] address found address for given segment
+    /// \return true iff address was found
     bool resolveInConcreteMap(const uint64_t &segment, uint64_t &address) const;
 
+    /// Looks up constant segment in segmentMap
+    /// \param pointer KValue containing ConstantExpr non-zero segment
+    /// \param[out] result ObjectPair found for given segment
+    /// \return true iff an ObjectPair was found
     bool resolveOneConstantSegment(const KValue &pointer,
                                    ObjectPair &result) const;
 
@@ -105,7 +113,10 @@ namespace klee {
                  unsigned maxResolutions=0,
                  time::Span timeout=time::Span()) const;
 
-    bool resolveConstantSegment(ExecutionState &state,
+    /// Resolve pointer, first checking for constant segment in segmentMap
+    /// and then for constant address in concreteAddressMap, Without returning the offset value
+    // TODO:: timeout and maxResolutions
+    bool resolveConstantPointer(ExecutionState &state,
                                 TimingSolver *solver,
                                 const KValue &pointer,
                                 ResolutionList &rl,
@@ -167,6 +178,10 @@ namespace klee {
                                   TimingSolver *solver,
                                   const ref<Expr> &address,
                                   ResolutionList &rl, llvm::Optional<uint64_t>& offset) const;
+
+    /// writes data from address to ObjectStates concrete store, checking if value stored in address has same length as
+    /// pointer on current platform.
+    /// if yes, resolveAddressWithOffset is called to check if it is not a pointer we have already seen before.
     void writeToWOS(ExecutionState &state, TimingSolver *solver, const uint8_t *address, ObjectState *wos) const;
   };
 } // End klee namespace

@@ -178,13 +178,13 @@ bool AddressSpace::resolve(ExecutionState &state,
                            unsigned maxResolutions,
                            time::Span timeout) const {
   if (isa<ConstantExpr>(pointer.getSegment()))
-    return resolveConstantSegment(state, solver, pointer, rl, maxResolutions, timeout);
+    return resolveConstantPointer(state, solver, pointer, rl, maxResolutions, timeout);
 
   bool mayBeTrue;
   ref<Expr> zeroSegment = ConstantExpr::create(0, pointer.getWidth());
   if (!solver->mayBeTrue(state, Expr::createIsZero(pointer.getSegment()), mayBeTrue))
     return true;
-  if (mayBeTrue && resolveConstantSegment(state, solver,
+  if (mayBeTrue && resolveConstantPointer(state, solver,
                                           KValue(zeroSegment, pointer.getValue()),
                                           rl, maxResolutions, timeout))
     return true;
@@ -203,7 +203,7 @@ bool AddressSpace::resolve(ExecutionState &state,
   return false;
 }
 
-bool AddressSpace::resolveConstantSegment(ExecutionState &state,
+bool AddressSpace::resolveConstantPointer(ExecutionState &state,
                                           TimingSolver *solver,
                                           const KValue &pointer,
                                           ResolutionList &rl,
@@ -310,7 +310,7 @@ bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
                                   const uint64_t &resolvedAddress, ExecutionState &state, TimingSolver *solver) {
   auto address = reinterpret_cast<uint8_t*>(resolvedAddress);
   auto &concreteStoreR = os->offsetPlane->concreteStore;
-  if (memcmp(address, concreteStoreR.data(), concreteStoreR.size())!=0) {
+  if (memcmp(address, concreteStoreR.data(), concreteStoreR.size()) != 0) {
     if (os->readOnly) {
       return false;
     } else {
@@ -325,14 +325,14 @@ void AddressSpace::writeToWOS(ExecutionState &state, TimingSolver *solver,
   auto &concreteStoreW = wos->offsetPlane->concreteStore;
   memcpy(concreteStoreW.data(), address, concreteStoreW.size());
 
-  if (concreteStoreW.size() == 8) {
-    KValue written = wos->read(0, Expr::Int64);
+  if (concreteStoreW.size() == Context::get().getPointerWidth() / 8) {
+    KValue written = wos->read(0, Context::get().getPointerWidth());
 
     ResolutionList rl;
     llvm::Optional<uint64_t> offset;
     resolveAddressWithOffset(state, solver, written.getValue(), rl, offset);
     if (!rl.empty()) {
-      auto result = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(offset.getValue(), Expr::Int64));
+      auto result = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(offset.getValue(), Context::get().getPointerWidth()));
       wos->write(0, result);
       return;
     }

@@ -677,7 +677,7 @@ void SpecialFunctionHandler::handleGetErrno(ExecutionState &state,
   ObjectPair result;
   //TODO segment
   auto segmentExpr = ConstantExpr::create(0, Expr::Int64);
-  auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Expr::Int64);
+  auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Context::get().getPointerWidth());
   bool resolved;
   Optional<uint64_t> temp;
   state.addressSpace.resolveOne(state, executor.solver,

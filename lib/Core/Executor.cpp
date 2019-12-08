@@ -3469,14 +3469,14 @@ void Executor::callExternalFunction(ExecutionState &state,
 
   ObjectPair result;
   auto segment = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
-  auto offset = ConstantExpr::create(0, Expr::Int64);
+  auto offset = ConstantExpr::create(0, Context::get().getPointerWidth());
   Optional<uint64_t> temp;
   bool resolved;
   state.addressSpace.resolveOne(state, solver,
                                 KValue(segment, offset),
                                 result, resolved, temp);
   if (temp)
-    offset = ConstantExpr::create(temp.getValue(), Expr::Int64);
+    offset = ConstantExpr::create(temp.getValue(), Context::get().getPointerWidth());
   if (!resolved)
     klee_error("Could not resolve memory object for errno");
 
@@ -3539,7 +3539,7 @@ void Executor::callExternalFunction(ExecutionState &state,
       state.addressSpace.resolveAddressWithOffset(state, solver, returnVal, rl, calculatedOffset);
 
       if (rl.size() == 1) {
-        value = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset.getValue(), Expr::Int64));
+        value = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(calculatedOffset.getValue(), Context::get().getPointerWidth()));
       } else {
         value = returnVal;
       }
@@ -3754,7 +3754,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
     ref<Expr> segment;
     if (offsetVal) {
       segment = ConstantExpr::alloc(mo->segment, Expr::Int64);
-      offset = ConstantExpr::alloc(offsetVal.getValue(), Expr::Int64);
+      offset = ConstantExpr::alloc(offsetVal.getValue(), Context::get().getPointerWidth());
     } else {
       segment = address.getSegment();
       offset = address.getOffset();

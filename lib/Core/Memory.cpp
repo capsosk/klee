@@ -94,9 +94,9 @@ void MemoryObject::getAllocInfo(std::string &result) const {
 
 ref<Expr> MemoryObject::getSymbolicAddress(klee::ArrayCache &array) {
   if (!symbolicAddress) {
-    symbolicAddress = array.CreateArray(std::string("mo_addr_for_seg:") + std::to_string(segment), Expr::Int64);
+    symbolicAddress = array.CreateArray(std::string("mo_addr_for_seg:") + std::to_string(segment), Context::get().getPointerWidth());
   }
-  return Expr::createTempRead(symbolicAddress.getValue(), Expr::Int64);
+  return Expr::createTempRead(symbolicAddress.getValue(), Context::get().getPointerWidth());
 }
 
 /***/

@@ -2291,10 +2291,8 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
         rightSegment->getZExtValue() != leftSegment->getZExtValue()) {
 
       ObjectPair op;
-      bool successLeft = false;
       bool successRight = false;
-
-      successLeft = state.addressSpace.resolveOneConstantSegment(leftOriginal, op);
+      bool successLeft = state.addressSpace.resolveOneConstantSegment(leftOriginal, op);
 
       if (successLeft) {
         leftArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(arrayCache);

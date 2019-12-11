@@ -675,8 +675,7 @@ void SpecialFunctionHandler::handleGetErrno(ExecutionState &state,
 
   // Retrieve the memory object of the errno variable
   ObjectPair result;
-  //TODO segment
-  auto segmentExpr = ConstantExpr::create(0, Expr::Int64);
+  auto segmentExpr = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
   auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Context::get().getPointerWidth());
   bool resolved;
   Optional<uint64_t> temp;

@@ -17,16 +17,16 @@ int main() {
 	int *p = (int*)0x108;
 	assert(*p == 3);
 
-  klee_define_fixed_object(ADDRESS, 8);
-  p = ADDRESS;
+	klee_define_fixed_object(ADDRESS, 8);
+	p = ADDRESS;
 	*p = 0;
-  int *k = ADDRESS + 1;
+	int *k = ADDRESS + 1;
 	*k = 10;
 	assert(*p == 0);
 	assert(*k == 10);
 	assert(*(ADDRESS + 1) == 10);
-	
+
 	p[2] = 9; // CHECK: memory error
 
-  return 0;
+	return 0;
 }

@@ -136,6 +136,8 @@ public:
 
   /// If not initialized, creates symbolic array representing it's address
   /// and returns ref<Expr> for it
+  /// \param array ArrayCache for creating the symbolic array
+  /// @return symbolic array representing symbolic address of given MO
   ref<Expr> getSymbolicAddress(klee::ArrayCache &array);
 
   void setName(std::string name) const {

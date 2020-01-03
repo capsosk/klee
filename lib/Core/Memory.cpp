@@ -92,6 +92,13 @@ void MemoryObject::getAllocInfo(std::string &result) const {
   info.flush();
 }
 
+ref<Expr> MemoryObject::getSymbolicAddress(klee::ArrayCache &array) {
+  if (!symbolicAddress) {
+    symbolicAddress = array.CreateArray(std::string("mo_addr_for_seg:") + std::to_string(segment), Context::get().getPointerWidth());
+  }
+  return Expr::createTempRead(symbolicAddress.getValue(), Context::get().getPointerWidth());
+}
+
 /***/
 
 ObjectStatePlane::ObjectStatePlane(const ObjectState *parent)
@@ -203,8 +210,8 @@ void ObjectStatePlane::flushToConcreteStore(TimingSolver *solver,
       bool success = solver->getValue(state, read8(i), ce);
       if (!success) {
         klee_warning("Solver timed out when getting a value for external call, "
-                     "byte %p+%u will have random value",
-                     (void *)parent->getObject()->address, i);
+                     "segment + offset %lu+%u will have random value",
+                     parent->getObject()->segment, i);
       } else {
         uint8_t value;
         ce->toMemory(&value);

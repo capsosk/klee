@@ -279,7 +279,7 @@ SpecialFunctionHandler::readStringAtAddress(ExecutionState &state,
   }
 
   KValue address(segmentExpr, offsetExpr);
-  if (!state.addressSpace.resolveConstantAddress(address, op)) {
+  if (!state.addressSpace.resolveOneConstantSegment(address, op)) {
     executor.terminateStateOnError(
         state, "Invalid string pointer passed to one of the klee_ functions",
         Executor::TerminateReason::User);
@@ -670,12 +670,13 @@ void SpecialFunctionHandler::handleGetErrno(ExecutionState &state,
   // Retrieve the memory object of the errno variable
   ObjectPair result;
   //TODO segment
-  auto segmentExpr = ConstantExpr::create(0, Expr::Int64);
-  auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Expr::Int64);
+  auto segmentExpr = ConstantExpr::create(ERRNO_SEGMENT, Expr::Int64);
+  auto addrExpr = ConstantExpr::create((uint64_t)errno_addr, Context::get().getPointerWidth());
   bool resolved;
+  Optional<uint64_t> temp;
   state.addressSpace.resolveOne(state, executor.solver,
                                 KValue(segmentExpr, addrExpr),
-                                result, resolved);
+                                result, resolved, temp);
   if (!resolved)
     executor.terminateStateOnError(state, "Could not resolve address for errno",
                                    Executor::User);
@@ -746,8 +747,8 @@ void SpecialFunctionHandler::handleRealloc(ExecutionState &state,
     executor.executeFree(*zeroSize.first, address, target);
   }
   if (zeroSize.second) { // size != 0
-    Executor::StatePair zeroPointer = executor.fork(*zeroSize.second, 
-                                                    Expr::createIsZero(address.getOffset()),
+    Executor::StatePair zeroPointer = executor.fork(*zeroSize.second,
+                                                    address.createIsZero(),
                                                     true);
     
     if (zeroPointer.first) { // address == 0
@@ -814,11 +815,11 @@ void SpecialFunctionHandler::handleCheckMemoryAccess(ExecutionState &state,
   } else {
     ObjectPair op;
 
-    if (!state.addressSpace.resolveConstantAddress(address, op)) {
+    if (!state.addressSpace.resolveOneConstantSegment(address, op)) {
       executor.terminateStateOnError(state,
                                      "check_memory_access: memory error",
 				     Executor::Ptr, NULL,
-                                     executor.getAddressInfo(state, address));
+                                     executor.getKValueInfo(state, address));
     } else {
       ref<Expr> chk = 
         op.first->getBoundsCheckPointer(address, cast<ConstantExpr>(size)->getZExtValue());
@@ -826,7 +827,7 @@ void SpecialFunctionHandler::handleCheckMemoryAccess(ExecutionState &state,
         executor.terminateStateOnError(state,
                                        "check_memory_access: memory error",
 				       Executor::Ptr, NULL,
-                                       executor.getAddressInfo(state, address));
+                                       executor.getKValueInfo(state, address));
       }
     }
   }
@@ -855,10 +856,20 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
          "expect constant size argument to klee_define_fixed_object");
 
   // TODO segment
-  uint64_t address = cast<ConstantExpr>(arguments[0].value)->getZExtValue();
   uint64_t size = cast<ConstantExpr>(arguments[1].value)->getZExtValue();
-  MemoryObject *mo = executor.memory->allocateFixed(address, size, state.prevPC->inst);
+  ref<ConstantExpr> addressExpr = cast<ConstantExpr>(arguments[0].value);
+  uint64_t address = addressExpr->getZExtValue();
+
+  ResolutionList rl;
+  Optional<uint64_t> temp;
+  state.addressSpace.resolveAddressWithOffset(state, executor.solver, addressExpr, rl, temp);
+  if (!rl.empty())
+    klee_error("Trying to allocate an overlapping object");
+
+  MemoryObject *mo = executor.memory->allocateFixed(size, state.prevPC->inst);
   executor.bindObjectInState(state, mo, false);
+  state.addressSpace.concreteAddressMap.insert({address, mo->segment});
+  state.addressSpace.segmentMap.insert(std::make_pair(mo->segment, mo));
   mo->isUserSpecified = true; // XXX hack;
 }
 
@@ -915,8 +926,9 @@ void SpecialFunctionHandler::handleMakeSymbolic(ExecutionState &state,
     executor.terminateStateOnError(state, "Incorrect number of arguments to klee_make_symbolic(void*, size_t, char*)", Executor::User);
     return;
   }
+  bool isZero = arguments[2].pointerSegment->isZero() && arguments[2].value->isZero();
+  name = isZero ? "" : readStringAtAddress(state, arguments[2]);
 
-  name = arguments[2].value->isZero() ? "" : readStringAtAddress(state, arguments[2]);
   if (name.length() == 0) {
     name = "unnamed";
     klee_warning("klee_make_symbolic: renamed empty name to \"unnamed\"");

@@ -37,7 +37,7 @@ void AddressSpace::unbindObject(const MemoryObject *mo) {
 
 const ObjectState *AddressSpace::findObject(const MemoryObject *mo) const {
   const MemoryMap::value_type *res = objects.lookup(mo);
-  
+
   return res ? res->second : 0;
 }
 
@@ -51,14 +51,24 @@ ObjectState *AddressSpace::getWriteable(const MemoryObject *mo,
     ObjectState *n = new ObjectState(*os);
     n->copyOnWriteOwner = cowKey;
     objects = objects.replace(std::make_pair(mo, n));
-    return n;    
+    return n;
   }
 }
 
-/// 
+bool AddressSpace::resolveInConcreteMap(const uint64_t& segment, uint64_t &address) const {
+  auto found = std::find_if(concreteAddressMap.begin(),concreteAddressMap.end(),
+                            [segment](std::pair<const uint64_t&, const uint64_t&> value) {
+                              return value.second == segment;
+                            });
+  if (found != concreteAddressMap.end()) {
+    address = found->first;
+    return true;
+  }
+  return false;
+}
 
-bool AddressSpace::resolveConstantAddress(const KValue &pointer,
-                                          ObjectPair &result) const {
+bool AddressSpace::resolveOneConstantSegment(const KValue &pointer,
+                                             ObjectPair &result) const {
   uint64_t segment = cast<ConstantExpr>(pointer.getSegment())->getZExtValue();
 
   if (segment != 0) {
@@ -66,23 +76,6 @@ bool AddressSpace::resolveConstantAddress(const KValue &pointer,
       // TODO bounds check?
       result = *objects.lookup(res->second);
       return true;
-    }
-  } else {
-    uint64_t address = cast<ConstantExpr>(pointer.getValue())->getZExtValue();
-    MemoryObject hack(address);
-    if (const MemoryMap::value_type *res = objects.lookup_previous(&hack)) {
-      const MemoryObject *mo = res->first;
-      // objects with symbolic size can only be accessed through segmented pointers
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(mo->size)) {
-        unsigned size = CE->getZExtValue();
-        // Check if the provided address is between start and end of the object
-        // [mo->address, mo->address + mo->size) or the object is a 0-sized object.
-        if ((size==0 && address==mo->address) ||
-            (address - mo->address < size)) {
-          result = *res;
-          return true;
-        }
-      }
     }
   }
   return false;
@@ -92,9 +85,18 @@ bool AddressSpace::resolveOne(ExecutionState &state,
                               TimingSolver *solver,
                               const KValue &pointer,
                               ObjectPair &result,
-                              bool &success) const {
+                              bool &success,
+                              llvm::Optional<uint64_t>& offset) const {
   if (pointer.isConstant()) {
-    success = resolveConstantAddress(pointer, result);
+    success = resolveOneConstantSegment(pointer, result);
+    if (!success) {
+      ResolutionList resList;
+      resolveAddressWithOffset(state, solver, pointer.getOffset(), resList, offset);
+      if (resList.size() == 1) {
+        success = true;
+        result = resList.at(0);
+      }
+    }
     return true;
   } else {
     ref<ConstantExpr> segment = dyn_cast<ConstantExpr>(pointer.getSegment());
@@ -105,45 +107,22 @@ bool AddressSpace::resolveOne(ExecutionState &state,
     }
 
     if (!segment->isZero()) {
-      return resolveConstantAddress(KValue(segment, pointer.getOffset()), result);
-    }
-
-    TimerStatIncrementer timer(stats::resolveTime);
-
-    // try cheap search, will succeed for any inbounds pointer
-
-    ref<ConstantExpr> cex;
-    if (!solver->getValue(state, pointer.getOffset(), cex))
-      return false;
-    uint64_t example = cex->getZExtValue();
-    MemoryObject hack(example);
-    const MemoryMap::value_type *res = objects.lookup_previous(&hack);
-    
-    if (res) {
-      const MemoryObject *mo = res->first;
-      // objects with symbolic size can only be accessed through segmented pointers
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(mo->size)) {
-        if (example - mo->address < CE->getZExtValue()) {
-          result = *res;
-          success = true;
-          return true;
-        }
-      }
+      return resolveOneConstantSegment(KValue(segment, pointer.getOffset()), result);
     }
 
     // didn't work, now we have to search
-       
+    MemoryObject hack;
     MemoryMap::iterator oi = objects.upper_bound(&hack);
     MemoryMap::iterator begin = objects.begin();
     MemoryMap::iterator end = objects.end();
-      
+
     MemoryMap::iterator start = oi;
     while (oi!=begin) {
       --oi;
       const MemoryObject *mo = oi->first;
-        
+
       bool mayBeTrue;
-      if (!solver->mayBeTrue(state, 
+      if (!solver->mayBeTrue(state,
                              mo->getBoundsCheckPointer(pointer), mayBeTrue))
         return false;
       if (mayBeTrue) {
@@ -152,7 +131,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
         return true;
       } else {
         bool mustBeTrue;
-        if (!solver->mustBeTrue(state, 
+        if (!solver->mustBeTrue(state,
                                 UgeExpr::create(pointer.getOffset(), mo->getBaseExpr()),
                                 mustBeTrue))
           return false;
@@ -166,7 +145,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
       const MemoryObject *mo = oi->first;
 
       bool mustBeTrue;
-      if (!solver->mustBeTrue(state, 
+      if (!solver->mustBeTrue(state,
                               UltExpr::create(pointer.getOffset(), mo->getBaseExpr()),
                               mustBeTrue))
         return false;
@@ -175,7 +154,7 @@ bool AddressSpace::resolveOne(ExecutionState &state,
       } else {
         bool mayBeTrue;
 
-        if (!solver->mayBeTrue(state, 
+        if (!solver->mayBeTrue(state,
                                mo->getBoundsCheckPointer(pointer),
                                mayBeTrue))
           return false;
@@ -192,42 +171,6 @@ bool AddressSpace::resolveOne(ExecutionState &state,
   }
 }
 
-int AddressSpace::checkPointerInObject(ExecutionState &state,
-                                       TimingSolver *solver,
-                                       const KValue& pointer,
-                                       const ObjectPair &op, ResolutionList &rl,
-                                       unsigned maxResolutions) const {
-  // XXX I think there is some query wasteage here?
-  // In the common case we can save one query if we ask
-  // mustBeTrue before mayBeTrue for the first result. easy
-  // to add I just want to have a nice symbolic test case first.
-  const MemoryObject *mo = op.first;
-  ref<Expr> inBounds = mo->getBoundsCheckPointer(pointer);
-  bool mayBeTrue;
-  if (!solver->mayBeTrue(state, inBounds, mayBeTrue)) {
-    return 1;
-  }
-
-  if (mayBeTrue) {
-    rl.push_back(op);
-
-    // fast path check
-    auto size = rl.size();
-    if (size == 1) {
-      bool mustBeTrue;
-      if (!solver->mustBeTrue(state, inBounds, mustBeTrue))
-        return 1;
-      if (mustBeTrue)
-        return 0;
-    }
-    else
-      if (size == maxResolutions)
-        return 1;
-  }
-
-  return 2;
-}
-
 bool AddressSpace::resolve(ExecutionState &state,
                            TimingSolver *solver,
                            const KValue &pointer,
@@ -235,13 +178,13 @@ bool AddressSpace::resolve(ExecutionState &state,
                            unsigned maxResolutions,
                            time::Span timeout) const {
   if (isa<ConstantExpr>(pointer.getSegment()))
-    return resolveConstantSegment(state, solver, pointer, rl, maxResolutions, timeout);
+    return resolveConstantPointer(state, solver, pointer, rl, maxResolutions, timeout);
 
   bool mayBeTrue;
   ref<Expr> zeroSegment = ConstantExpr::create(0, pointer.getWidth());
   if (!solver->mayBeTrue(state, Expr::createIsZero(pointer.getSegment()), mayBeTrue))
     return true;
-  if (mayBeTrue && resolveConstantSegment(state, solver,
+  if (mayBeTrue && resolveConstantPointer(state, solver,
                                           KValue(zeroSegment, pointer.getValue()),
                                           rl, maxResolutions, timeout))
     return true;
@@ -260,7 +203,7 @@ bool AddressSpace::resolve(ExecutionState &state,
   return false;
 }
 
-bool AddressSpace::resolveConstantSegment(ExecutionState &state,
+bool AddressSpace::resolveConstantPointer(ExecutionState &state,
                                           TimingSolver *solver,
                                           const KValue &pointer,
                                           ResolutionList &rl,
@@ -268,93 +211,43 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
                                           time::Span timeout) const {
   if (!cast<ConstantExpr>(pointer.getSegment())->isZero()) {
     ObjectPair res;
-    if (resolveConstantAddress(pointer, res))
+    if (resolveOneConstantSegment(pointer, res))
       rl.push_back(res);
     return false;
   }
-
-  TimerStatIncrementer timer(stats::resolveTime);
-
-  // XXX in general this isn't exactly what we want... for
-  // a multiple resolution case (or for example, a \in {b,c,0})
-  // we want to find the first object, find a cex assuming
-  // not the first, find a cex assuming not the second...
-  // etc.
-
-  // XXX how do we smartly amortize the cost of checking to
-  // see if we need to keep searching up/down, in bad cases?
-  // maybe we don't care?
-
-  // XXX we really just need a smart place to start (although
-  // if its a known solution then the code below is guaranteed
-  // to hit the fast path with exactly 2 queries). we could also
-  // just get this by inspection of the expr.
-
-  ref<ConstantExpr> cex;
-  if (!solver->getValue(state, pointer.getOffset(), cex))
-    return true;
-  uint64_t example = cex->getZExtValue();
-  MemoryObject hack(example);
-
-  MemoryMap::iterator oi = objects.upper_bound(&hack);
-  MemoryMap::iterator begin = objects.begin();
-  MemoryMap::iterator end = objects.end();
-
-  MemoryMap::iterator start = oi;
-
-  // XXX in the common case we can save one query if we ask
-  // mustBeTrue before mayBeTrue for the first result. easy
-  // to add I just want to have a nice symbolic test case first.
-
-  // search backwards, start with one minus because this
-  // is the object that p *should* be within, which means we
-  // get write off the end with 4 queries (XXX can be better,
-  // no?)
-    while (oi!=begin) {
-      --oi;
-      const MemoryObject *mo = oi->first;
-      if (timeout && timeout < timer.delta())
-        return true;
-
-      int incomplete =
-          checkPointerInObject(state, solver, pointer,
-                               *oi, rl, maxResolutions);
-      if (incomplete != 2)
-        return incomplete ? true : false;
-
-
-      bool mustBeTrue;
-      if (!solver->mustBeTrue(state, UgeExpr::create(pointer.getOffset(),
-                                                     mo->getBaseExpr()),
-                              mustBeTrue))
-        return true;
-      if (mustBeTrue)
-         break;
-    }
-
-    // search forwards
-    for (oi = start; oi != end; ++oi) {
-      const MemoryObject *mo = oi->first;
-      if (timeout && timeout < timer.delta())
-        return true;
-
-      bool mustBeTrue;
-      if (!solver->mustBeTrue(state,
-                              UltExpr::create(pointer.getOffset(),
-                                              mo->getBaseExpr()),
-                              mustBeTrue))
-        return true;
-      if (mustBeTrue)
-        break;
-
-      int incomplete =
-          checkPointerInObject(state, solver, pointer,
-                               *oi, rl, maxResolutions);
-      if (incomplete != 2)
-        return incomplete ? true : false;
-    }
+  llvm::Optional<uint64_t> temp;
+  resolveAddressWithOffset(state, solver, pointer.getOffset(), rl, temp);
 
   return false;
+}
+void AddressSpace::resolveAddressWithOffset(const ExecutionState &state,
+                                            TimingSolver *solver,
+                                            const ref<Expr> &address,
+                                            ResolutionList &rl, llvm::Optional<uint64_t>& offset) const {
+  ConstantExpr* value = dyn_cast<ConstantExpr>(address);
+  if (!value)
+    return;
+
+  ObjectPair op;
+  for (const auto pair: concreteAddressMap) {
+    const auto& resolvedAddress = pair.first;
+    const auto& resolvedSegment = pair.second;
+    const auto *res = segmentMap.lookup(resolvedSegment);
+
+    if (!res)
+      continue;
+
+    op = *objects.lookup(res->second);
+    auto subexpr = SubExpr::alloc(address, ConstantExpr::alloc(resolvedAddress, Context::get().getPointerWidth()));
+    auto check = op.first->getBoundsCheckOffset(subexpr);
+    bool mayBeTrue = false;
+    if (solver->mayBeTrue(state, check, mayBeTrue)) {
+      if (mayBeTrue) {
+        rl.push_back(op);
+        offset = cast<ConstantExpr>(address)->getZExtValue() - resolvedAddress;
+      }
+    }
+  }
 }
 
 // These two are pretty big hack so we can sort of pass memory back
@@ -363,39 +256,49 @@ bool AddressSpace::resolveConstantSegment(ExecutionState &state,
 // transparently avoid screwing up symbolics (if the byte is symbolic
 // then its concrete cache byte isn't being used) but is just a hack.
 
-void AddressSpace::copyOutConcretes() {
-  for (MemoryMap::iterator it = objects.begin(), ie = objects.end(); 
+void AddressSpace::copyOutConcretes(const SegmentAddressMap &resolved, bool ignoreReadOnly) {
+  for (MemoryMap::iterator it = objects.begin(), ie = objects.end();
        it != ie; ++it) {
     const MemoryObject *mo = it->first;
 
+    auto pair = resolved.find(mo->segment);
+    if (pair == resolved.end())
+      continue;
+
     if (!mo->isUserSpecified) {
       ObjectState *os = it->second;
-      auto address = reinterpret_cast<std::uint8_t*>(mo->address);
+      auto address = reinterpret_cast<std::uint8_t*>(pair->second);
 
       // if the allocated real virtual process' memory
       // is less that the size bound, do not try to write to it...
       if (os->getSizeBound() > mo->allocatedSize)
         continue;
 
-      if (!os->readOnly) {
-        auto &concreteStore = os->offsetPlane->concreteStore;
-        concreteStore.resize(os->offsetPlane->sizeBound,
-                             os->offsetPlane->initialValue);
-        memcpy(address, concreteStore.data(), concreteStore.size());
+      if (!os->readOnly || ignoreReadOnly) {
+        if (address) {
+          auto &concreteStore = os->offsetPlane->concreteStore;
+          concreteStore.resize(os->offsetPlane->sizeBound,
+                               os->offsetPlane->initialValue);
+
+          memcpy(address, concreteStore.data(), concreteStore.size());
+        }
       }
     }
   }
 }
 
-bool AddressSpace::copyInConcretes() {
-  for (MemoryMap::iterator it = objects.begin(), ie = objects.end(); 
+bool AddressSpace::copyInConcretes(const SegmentAddressMap &resolved, ExecutionState &state, TimingSolver *solver) {
+  for (MemoryMap::iterator it = objects.begin(), ie = objects.end();
        it != ie; ++it) {
     const MemoryObject *mo = it->first;
+    auto pair = resolved.find(mo->segment);
+    if (pair == resolved.end())
+      continue;
 
     if (!mo->isUserSpecified) {
       const ObjectState *os = it->second;
 
-      if (!copyInConcrete(mo, os, mo->address))
+      if (!copyInConcrete(mo, os, pair->second, state, solver))
         return false;
     }
   }
@@ -404,25 +307,40 @@ bool AddressSpace::copyInConcretes() {
 }
 
 bool AddressSpace::copyInConcrete(const MemoryObject *mo, const ObjectState *os,
-                                  uint64_t src_address) {
-  auto address = reinterpret_cast<std::uint8_t*>(src_address);
-  // TODO segment
+                                  const uint64_t &resolvedAddress, ExecutionState &state, TimingSolver *solver) {
+  auto address = reinterpret_cast<uint8_t*>(resolvedAddress);
   auto &concreteStoreR = os->offsetPlane->concreteStore;
-  if (memcmp(address, concreteStoreR.data(), concreteStoreR.size())!=0) {
+  if (memcmp(address, concreteStoreR.data(), concreteStoreR.size()) != 0) {
     if (os->readOnly) {
       return false;
     } else {
       ObjectState *wos = getWriteable(mo, os);
-      auto &concreteStoreW = wos->offsetPlane->concreteStore;
-      memcpy(concreteStoreW.data(), address, concreteStoreW.size());
+      writeToWOS(state, solver, address, wos);
     }
   }
   return true;
+}
+void AddressSpace::writeToWOS(ExecutionState &state, TimingSolver *solver,
+                              const uint8_t *address, ObjectState *wos) const {
+  auto &concreteStoreW = wos->offsetPlane->concreteStore;
+  memcpy(concreteStoreW.data(), address, concreteStoreW.size());
+
+  if (concreteStoreW.size() == Context::get().getPointerWidth() / 8) {
+    KValue written = wos->read(0, Context::get().getPointerWidth());
+
+    ResolutionList rl;
+    llvm::Optional<uint64_t> offset;
+    resolveAddressWithOffset(state, solver, written.getValue(), rl, offset);
+    if (!rl.empty()) {
+      auto result = KValue(rl[0].first->getSegmentExpr(), ConstantExpr::alloc(offset.getValue(), Context::get().getPointerWidth()));
+      wos->write(0, result);
+      return;
+    }
+  }
 }
 
 /***/
 
 bool MemoryObjectLT::operator()(const MemoryObject *a, const MemoryObject *b) const {
-  return a->address < b->address;
+  return a->id < b->id;
 }
-

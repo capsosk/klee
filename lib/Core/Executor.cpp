@@ -2316,6 +2316,9 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     ref<Expr> leftArray;
     ref<Expr> rightArray;
 
+    /// Use in case one of the two MOs was not resolved (possibly freed)
+    llvm::Optional<const Array *> symbolicArray;
+
     /// Only use symbolics with Constant values(offsets)
     bool useOriginalValues = true;
 
@@ -2332,20 +2335,42 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
         !rightSegment->isZero() &&
         rightSegment->getZExtValue() != leftSegment->getZExtValue()) {
 
-      ObjectPair op;
-      bool successRight = false;
-      bool successLeft =
-          state.addressSpace.resolveOneConstantSegment(leftOriginal, op);
+      ObjectPair opLeft;
+      ObjectPair opRight;
 
-      if (successLeft) {
-        leftArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(
-            arrayCache);
-        successRight =
-            state.addressSpace.resolveOneConstantSegment(rightOriginal, op);
-      }
-      if (successRight) {
-        rightArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(
-            arrayCache);
+      bool successRight =
+          state.addressSpace.resolveOneConstantSegment(rightOriginal, opRight);
+      bool successLeft =
+          state.addressSpace.resolveOneConstantSegment(leftOriginal, opLeft);
+
+      if (successLeft && successRight) {
+        leftArray = const_cast<MemoryObject *>(opLeft.first)
+                        ->getSymbolicAddress(arrayCache);
+        rightArray = const_cast<MemoryObject *>(opRight.first)
+                         ->getSymbolicAddress(arrayCache);
+        success = true;
+      } else if (successLeft || successRight) {
+
+        if (successRight) {
+          symbolicArray = arrayCache.CreateArray(
+              std::string("unresolved_mo_addr:") +
+                  std::to_string(rightSegment->getZExtValue()),
+              Context::get().getPointerWidth());
+          leftArray = Expr::createTempRead(symbolicArray.getValue(),
+                                           Context::get().getPointerWidth());
+          rightArray = const_cast<MemoryObject *>(opRight.first)
+                           ->getSymbolicAddress(arrayCache);
+        }
+        if (successLeft) {
+          symbolicArray = arrayCache.CreateArray(
+              std::string("unresolved_mo_addr:") +
+                  std::to_string(leftSegment->getZExtValue()),
+              Context::get().getPointerWidth());
+          rightArray = Expr::createTempRead(symbolicArray.getValue(),
+                                            Context::get().getPointerWidth());
+          leftArray = const_cast<MemoryObject *>(opLeft.first)
+                          ->getSymbolicAddress(arrayCache);
+        }
         success = true;
       }
     }

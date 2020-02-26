@@ -2300,6 +2300,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
   case Instruction::ICmp: {
     CmpInst *ci = cast<CmpInst>(i);
     ICmpInst *ii = cast<ICmpInst>(ci);
+    const auto& predicate = ii->getPredicate();
 
     const Cell &leftOriginal = eval(ki, 0, state);
     const Cell &rightOriginal = eval(ki, 1, state);
@@ -2324,6 +2325,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     }
 
     bool success = false;
+    bool deletedObject = false;
     const auto &pointerWidth = Context::get().getPointerWidth();
 
     if (!useOriginalValues &&
@@ -2358,12 +2360,13 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
         rightArray = const_cast<MemoryObject *>(op.first)->getSymbolicAddress(
             arrayCache);
       }
-      success = successLeft || successRight;
+      success = successLeft && successRight;
+      deletedObject = successLeft == !successRight;
     }
     KValue left;
     KValue right;
 
-    if (!success) {
+    if (!success && !deletedObject) {
       left = static_cast<KValue>(leftOriginal);
       right = static_cast<KValue>(rightOriginal);
     } else {
@@ -2373,7 +2376,18 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
       right = KValue(rightOriginal.getSegment(), rightArray);
     }
 
-    switch (ii->getPredicate()) {
+    if (deletedObject) {
+      switch (predicate) {
+      case ICmpInst::ICMP_EQ:
+      case ICmpInst::ICMP_NE:
+        bindLocal(ki, state, left.SymbCmp(right));
+        return;
+      default:
+        break;
+      }
+    }
+
+    switch (predicate) {
     case ICmpInst::ICMP_EQ:
       bindLocal(ki, state, left.Eq(right));
       break;
@@ -2408,6 +2422,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
       terminateStateOnExecError(state, "invalid ICmp predicate");
     }
     break;
+
   }
 
     // Memory instructions...

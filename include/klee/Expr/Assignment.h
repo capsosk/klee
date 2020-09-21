@@ -48,6 +48,14 @@ namespace klee {
         content[i] = other[i];
       }
     }
+
+    MapArrayModel& operator=(const MapArrayModel &other) {
+      if (this != &other)
+        content = other.content;
+
+      return *this;
+    }
+
     std::map<uint32_t, uint8_t> asMap() const {
       return content;
     }

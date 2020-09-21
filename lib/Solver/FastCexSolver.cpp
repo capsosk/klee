@@ -1118,7 +1118,7 @@ FastCexSolver::computeInitialValues(const Query& query,
   // Propogation found a satisfying assignment, compute the initial values.
   std::vector<ref<ReadExpr> > reads;
   findReads(query.expr, true, reads);
-  for (const auto constraint : query.constraints)
+  for (const auto &constraint : query.constraints)
     findReads(constraint, true, reads);
 
   for (ref<ReadExpr> read : reads) {

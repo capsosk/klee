@@ -4426,7 +4426,7 @@ bool Executor::getSymbolicSolution(const ExecutionState &state,
     auto value = pair.first;
     tmp.addConstraint(EqExpr::create(it.value.getValue(), value));
 
-    pair = std::move(solver->getRange(tmp, it.value.getSegment()));
+    pair = solver->getRange(tmp, it.value.getSegment());
     auto segment = pair.first;
     tmp.addConstraint(EqExpr::create(it.value.getSegment(), segment));
 

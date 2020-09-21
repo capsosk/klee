@@ -13,8 +13,7 @@
 #include <klee/KValue.h>
 
 namespace klee {
-  class Cell : public KValue {
-  public:
+  struct Cell : public KValue {
     Cell() {}
     Cell(const KValue &other) : KValue(other) {}
 

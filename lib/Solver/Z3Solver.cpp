@@ -343,7 +343,7 @@ SolverImpl::SolverRunStatus Z3SolverImpl::handleSolverResponse(
 
     std::vector<ref<ReadExpr> > reads;
     findReads(query.expr, true, reads);
-    for (const auto constraint: query.constraints)
+    for (const auto &constraint: query.constraints)
       findReads(constraint, true, reads);
 
     Assignment::map_bindings_ty bindings;

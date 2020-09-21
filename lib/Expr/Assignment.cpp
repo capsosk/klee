@@ -31,7 +31,7 @@ void Assignment::createConstraintsFromAssignment(
        it != ie; ++it) {
     const Array *array = it->first;
     const auto &values = it->second;
-    for (const auto pair : values.asMap()) {
+    for (const auto &pair : values.asMap()) {
       unsigned arrayIndex = pair.first;
       unsigned char value = pair.second;
       out.push_back(EqExpr::create(
@@ -46,7 +46,7 @@ void MapArrayModel::toCompact(CompactArrayModel& model) const {
   model.skipRanges.clear();
   model.values.clear();
   unsigned cursor = 0;
-  for (const auto item : content) {
+  for (const auto &item : content) {
     unsigned difference = item.first - cursor;
     if (shouldSkip(difference)) {
       model.skipRanges.push_back(std::make_pair(cursor, difference));
@@ -60,7 +60,7 @@ void MapArrayModel::toCompact(CompactArrayModel& model) const {
 
 uint8_t CompactArrayModel::get(unsigned index) const {
   unsigned skipTotal = 0;
-  for (const auto item : skipRanges) {
+  for (const auto &item : skipRanges) {
     unsigned skipStart = item.first;
     unsigned skipCount = item.second;
     unsigned skipEnd = skipStart + skipCount;
@@ -83,7 +83,7 @@ std::map<uint32_t, uint8_t> CompactArrayModel::asMap() const {
   std::map<uint32_t, uint8_t> retMap;
   unsigned index = 0;
   unsigned cursor = 0;
-  for (const auto item : skipRanges) {
+  for (const auto &item : skipRanges) {
     for (; index < item.first; index++, cursor++) {
       retMap[index] = values[cursor];
     }
@@ -99,7 +99,7 @@ std::vector<uint8_t> CompactArrayModel::asVector() const {
   std::vector<uint8_t> result;
   unsigned index = 0;
   unsigned cursor = 0;
-  for (const auto item : skipRanges) {
+  for (const auto &item : skipRanges) {
     for (; index < item.first; index++, cursor++) {
       result.push_back(values[cursor]);
     }

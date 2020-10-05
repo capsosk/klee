@@ -764,21 +764,21 @@ void SpecialFunctionHandler::handleRealloc(ExecutionState &state,
           executor.terminateStateOnError(*it->second,
                                          "memory error: realloc of read-only object",
                                          Executor::Ptr, nullptr,
-                                         executor.getAddressInfo(*it->second,
+                                         executor.getKValueInfo(*it->second,
                                                                  address)
                                          );
         } else if (it->first.first->isLocal) {
           executor.terminateStateOnError(*it->second,
                                          "memory error: realloc on local object",
                                          Executor::Ptr, nullptr,
-                                         executor.getAddressInfo(*it->second,
+                                         executor.getKValueInfo(*it->second,
                                                                  address)
                                          );
         } else if (it->first.first->isGlobal) {
           executor.terminateStateOnError(*it->second,
                                          "memory error: realloc on global object",
                                          Executor::Ptr, nullptr,
-                                         executor.getAddressInfo(*it->second,
+                                         executor.getKValueInfo(*it->second,
                                                                  address)
                                          );
         } else {
